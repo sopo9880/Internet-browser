@@ -64,11 +64,9 @@ class BrowserDpiProxy {
   Future<bool> _startWindows() async {
     if (!await checkLocalSocks()) {
       final exeDirectory = File(Platform.resolvedExecutable).parent.path;
-      final binary = File(exeDirectory +
-          Platform.pathSeparator +
-          'tools' +
-          Platform.pathSeparator +
-          'ciadpi.exe');
+      final binary = File(
+        '$exeDirectory${Platform.pathSeparator}tools${Platform.pathSeparator}ciadpi.exe',
+      );
       if (!await binary.exists()) {
         _status = 'ByeDPI 실행 파일이 설치되지 않았습니다.';
         return false;
