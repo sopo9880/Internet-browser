@@ -1,8 +1,8 @@
 # Internet-browser
 
-Windows + Android Flutter browser — v0.1.2 in development.
+Windows + Android browser — v0.2.0 development (single DPI + media + Chromium extensions milestone).
 
-Latest released version: [v0.1.0](https://github.com/sopo9880/Internet-browser/releases/tag/v0.1.0).
+Latest published release: [v0.1.1](https://github.com/sopo9880/Internet-browser/releases/tag/v0.1.1).
 
 ## v0.1.1 changes
 
@@ -29,3 +29,23 @@ Use Flutter 3.35.7 with the appropriate Windows/Android native SDK:
 On Windows, CI obtains the pinned upstream ByeDPI archive using tool/install_byedpi.ps1 and checks SHA-256 before putting ciadpi.exe and its MIT license alongside the app. Android uses an optional local proxy supplied by a separate app; no root permission is needed for the browser itself.
 
 Pull requests perform tests and build test APK/EXE artifacts, never using production release signing secrets. An authorized PR merge triggers the separate production release workflow (signed APK + Windows installer, checksums), retaining v0.x versions. See docs/DPI_AND_MEDIA.md and docs/UPDATES.md.
+
+
+## v0.2.0 combined release milestone (under development)
+
+This version replaces the previously planned v0.1.2 release. The open
+v0.1.2 development PR is reused rather than rebased into a second PR.
+
+- Preserve the Android-native ByeDPI, Windows DPI presets, safe area, address
+  focus fix, generic video metadata, offline video library and Android PiP.
+- Android must actually run the **Chrome Web Store AdBlock extension**
+  gighmmpiobklfepjocnamgkkbiglidom, not an imitation ad filter.
+- The v0.2.0 Android Chromium extension host contract and diagnostic UI are
+  currently integrated, but Android still uses WebView as its underlying
+  browsing engine. Real Chrome extension installation is NOT implemented yet.
+- The CI and release gates deliberately reject publishing v0.2.0 without
+  physical-device acceptance for real Chromium/MV3/DNR, Chrome Web Store
+  install, AdBlock startup, network request blocking, preferences and
+  persistence. A green Android APK build is NOT extension support.
+- See docs/ANDROID_CHROMIUM_EXTENSIONS.md for the engine migration and proof
+  required. Never mark this release complete without that evidence.

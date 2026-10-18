@@ -29,6 +29,9 @@ jobs:
       - name: Validate 0.x version and calculate increasing Android versionCode
         id: version
         run: python3 tool/release_metadata.py
+      - name: Block v0.2.0 release until Chromium/AdBlock is proven
+        if: steps.version.outputs.version == '0.2.0'
+        run: python3 tool/chromium_extension_acceptance.py
       - name: Skip a version already released
         id: existing
         env:

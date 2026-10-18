@@ -56,7 +56,7 @@ jobs:
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Android-v0.1.2
+          name: Browser-Android-v0.2.0
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
@@ -100,11 +100,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-v0.1.2
+          name: Browser-Windows-v0.2.0
           path: build/windows/x64/runner/Release/**
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-Setup-v0.1.2
+          name: Browser-Windows-Setup-v0.2.0
           path: dist/Internet-browser-Windows-Setup-v*.exe
           if-no-files-found: error
+
+  android_chromium_adblock_acceptance:
+    runs-on: ubuntu-24.04
+    needs: [android]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require real Android Chromium + exact AdBlock extension
+        run: |
+          # Intentionally fails until a real Chromium Android build and
+          # trusted physical-device test provide this evidence.
+          # A passing Flutter/WebView build cannot satisfy this gate.
+          python3 tool/chromium_extension_acceptance.py

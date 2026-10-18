@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ad_blocker.dart';
+import 'chrome_extensions_screen.dart';
 import 'address_parser.dart';
 import 'download_manager.dart';
 import 'dpi_proxy.dart';
@@ -1218,6 +1219,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     _showDownloads();
                   case 'settings':
                     _showSettings();
+                  case 'extensions':
+                    Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => const ChromeExtensionsScreen(),
+                      ),
+                    );
                   case 'toggle_tabs':
                     setState(() => _showTabStrip = !_showTabStrip);
                 }
@@ -1234,6 +1241,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 const PopupMenuItem(value: 'history', child: Text('방문 기록')),
                 const PopupMenuItem(
                     value: 'downloads', child: Text('동영상 서재')),
+                if (defaultTargetPlatform == TargetPlatform.android)
+                  const PopupMenuItem(
+                    value: 'extensions',
+                    child: Text('Chrome 확장 관리 (준비 중)'),
+                  ),
                 const PopupMenuItem(
                     value: 'settings', child: Text('광고·DPI 설정')),
                 if (wide) PopupMenuItem(

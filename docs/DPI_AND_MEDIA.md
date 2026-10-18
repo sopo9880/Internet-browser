@@ -27,7 +27,7 @@ advertisements, not guaranteed full blocking of server-inserted ads, and
 a user-confirmed downloader for permitted muxed streams (typically <=360p).
 DRM and separate high-resolution video/audio merging are not supported.
 
-## v0.1.2 in development
+## v0.2.0 combined release (work in progress)
 
 - Android fixes system status-bar collision with a SafeArea; page pointer and scroll events release address-field focus.
 - ByeDPI preferences support balanced/split/disorder/aggressive/custom presets, with only allowlisted CLI arguments and validated parameters. Windows changes apply on restart; Android restarts the internal proxy when changing settings.
@@ -37,3 +37,21 @@ DRM and separate high-resolution video/audio merging are not supported.
 - Android uses an in-app MediaSession foreground playback notification and system picture-in-picture support (Android 8.0+); video background pause is disabled for this screen. Playback/service/device behavior still needs real-device validation.
 - Selecting another quality **does not upsample a saved file**: only source tracks exist in a downloaded media file. Quality selection is only offered when the file contains multiple video tracks. YouTube downloads continue to use permitted available audio+video muxed streams; high-resolution separate tracks, service-account features and DRM are not cloned.
 - Video metadata is derived from the page/site and saved locally. It never attempts to read protected credentials from sites.
+
+
+## Chrome extension compatibility gate (v0.2.0)
+
+Android Chrome Web Store extension compatibility is not supplied by Flutter
+WebView, Android WebView Chromium libraries, embedded scripts, or an external
+browser intent. The native Chromium browser engine and extension system need
+real integration. Android's current MethodChannel honestly returns
+"android-webview" with all Chrome extension capabilities disabled. The UI
+also reports unsupported until the proper engine exists.
+
+The required extension is AdBlock ID
+gighmmpiobklfepjocnamgkkbiglidom. Release proof includes actual MV3 service
+worker activation, declarativeNetRequest page-request blocking, Chrome Web
+Store install, permission prompts, extension action/popup, persistence, and
+validation of existing ByeDPI, library and player features. CI intentionally
+fails its Android AdBlock acceptance job until this evidence is provided by a
+real physical-device test. Do not manually override it.

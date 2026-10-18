@@ -122,7 +122,7 @@ class BrowserDpiProxy {
         _status = 'Android 네이티브 엔진 경로를 확인하지 못했습니다.';
         return false;
       }
-      final exe = File('${libDir}${Platform.pathSeparator}libciadpi.so');
+      final exe = File('$libDir${Platform.pathSeparator}libciadpi.so');
       if (!await exe.exists()) {
         _status = '이 기기의 Android ABI에 맞는 내장 ByeDPI 엔진이 없습니다.';
         return false;
