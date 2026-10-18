@@ -32,7 +32,7 @@ class AdBlocker {
   static bool hostMatches(String host, String domain) {
     final h = host.toLowerCase();
     final d = domain.toLowerCase();
-    return h == d || h.endsWith('.' + d);
+    return h == d || h.endsWith('.$d');
   }
 
   bool isExempt(Uri page) {

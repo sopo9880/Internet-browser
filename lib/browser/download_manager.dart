@@ -42,7 +42,7 @@ class VideoDownloadManager extends ChangeNotifier {
   Future<Directory> _videoDirectory() async {
     final root = await getApplicationDocumentsDirectory();
     final dir = Directory(
-      root.path + Platform.pathSeparator + 'Videos',
+      '${root.path}${Platform.pathSeparator}Videos',
     );
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
@@ -94,15 +94,10 @@ class VideoDownloadManager extends ChangeNotifier {
     final dot = safe.lastIndexOf('.');
     final stem = safe.substring(0, dot);
     final ext = safe.substring(dot);
-    var candidate = dir.path + Platform.pathSeparator + safe;
+    var candidate = '${dir.path}${Platform.pathSeparator}$safe';
     var suffix = 1;
     while (await File(candidate).exists()) {
-      candidate = dir.path +
-          Platform.pathSeparator +
-          stem +
-          '_' +
-          suffix.toString() +
-          ext;
+      candidate = '${dir.path}${Platform.pathSeparator}${stem}_$suffix$ext';
       suffix++;
     }
     return candidate;

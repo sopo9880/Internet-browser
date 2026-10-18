@@ -140,7 +140,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         urlRequest: URLRequest(url: WebUri(uri.toString())),
       );
     } catch (error) {
-      _message('탐색 실패: ' + error.toString());
+      _message('탐색 실패: $error');
     }
   }
 
@@ -245,12 +245,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
     try {
       final item = await _downloads.download(uri);
       if (item.state == VideoDownloadState.complete) {
-        _message('다운로드 완료: ' + item.fileName);
+        _message('다운로드 완료: ${item.fileName}');
       } else if (item.state == VideoDownloadState.failed) {
-        _message('다운로드 실패: ' + (item.error ?? '오류'));
+        _message('다운로드 실패: ${item.error ?? '오류'}');
       }
     } catch (error) {
-      _message('다운로드 오류: ' + error.toString());
+      _message('다운로드 오류: $error');
     }
   }
 
@@ -340,10 +340,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                                         value: item.progress / 100,
                                       )
                                     : Text(
-                                        item.state.name +
-                                            (item.error == null
-                                                ? ''
-                                                : ': ' + item.error!),
+                                        item.error == null ? item.state.name : '${item.state.name}: ${item.error}',
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -717,12 +714,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
             if (!wide)
               TextButton(
                 onPressed: _addTab,
-                child: Text(_tabs.length.toString() + ' +'),
+                child: Text('${_tabs.length} +'),
               ),
           ],
         ),
         body: _error != null
-            ? Center(child: SelectableText('브라우저 초기화 실패:\n' + _error!))
+            ? Center(child: SelectableText('브라우저 초기화 실패:\n$_error'))
             : !_ready
                 ? const Center(child: CircularProgressIndicator())
                 : Column(

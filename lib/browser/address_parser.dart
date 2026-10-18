@@ -21,7 +21,7 @@ class AddressParser {
       return search(value);
     }
 
-    final withScheme = Uri.tryParse('https://' + value);
+    final withScheme = Uri.tryParse('https://$value');
     if (withScheme == null || !isRemoteHttp(withScheme)) {
       return search(value);
     }

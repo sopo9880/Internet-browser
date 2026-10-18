@@ -15,7 +15,11 @@ jobs:
           flutter-version: '3.35.7'
           channel: stable
       - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android,windows .
+      - name: Restore project widget test after Flutter bootstrap
+        run: git show HEAD:test/widget_test.dart > test/widget_test.dart
       - run: python3 tool/prepare_platforms.py
+      - name: Validate Android manifest XML
+        run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get
       - run: dart format --output=write lib test
       - run: flutter analyze
