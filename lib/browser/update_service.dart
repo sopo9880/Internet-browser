@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:open_filex/open_filex.dart';
@@ -320,6 +321,25 @@ class BrowserUpdateService {
     } catch (_) {
       if (await partial.exists()) await partial.delete();
       rethrow;
+    }
+  }
+
+  /// Open the exact Android per-app "install unknown apps" screen, leaving
+  /// the final permission switch entirely under the user's control.
+  /// Samsung Auto Blocker is separate and may need manual Settings navigation.
+  Future<void> openAndroidInstallSettings() async {
+    if (!Platform.isAndroid) {
+      throw UnsupportedError('Android 설치 권한 설정 전용 기능입니다.');
+    }
+    try {
+      await const AndroidIntent(
+        action: 'android.settings.MANAGE_UNKNOWN_APP_SOURCES',
+        data: 'package:io.github.sopo9880.internet_browser',
+      ).launch();
+    } catch (_) {
+      await const AndroidIntent(
+        action: 'android.settings.SECURITY_SETTINGS',
+      ).launch();
     }
   }
 

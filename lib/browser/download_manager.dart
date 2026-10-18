@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'video_detector.dart';
 
@@ -159,8 +160,90 @@ class VideoDownloadManager extends ChangeNotifier {
     return item;
   }
 
+
+  /// User-confirmed, permitted non-DRM YouTube stream. The available muxed
+  /// audio+video formats are usually <= 360p; no silent DRM bypass or muxing.
+  Future<VideoDownloadItem> downloadYoutube(Uri page) async {
+    final id = VideoDetector.youtubeVideoId(page);
+    if (id == null) {
+      throw ArgumentError('지원하는 YouTube 동영상 주소가 아닙니다.');
+    }
+    final youtube = YoutubeExplode();
+    VideoDownloadItem? item;
+    try {
+      final manifest = await youtube.videos.streams.getManifest(id);
+      final candidates = manifest.muxed.where(
+        (stream) => stream.container == StreamContainer.mp4 ||
+            stream.container == StreamContainer.webM,
+      ).toList()
+        ..sort((a, b) => b.videoResolution.height.compareTo(
+              a.videoResolution.height,
+            ));
+      if (candidates.isEmpty) {
+        throw StateError('음성과 영상이 함께 있는 다운로드 가능 스트림이 없습니다.');
+      }
+      final choice = candidates.first;
+      final extension = choice.container.name;
+      final path = await _unusedPath(
+        Uri.parse('https://media.local/youtube_$id.$extension'),
+      );
+      item = VideoDownloadItem(
+        url: page,
+        filePath: path,
+        fileName: path.split(Platform.pathSeparator).last,
+        state: VideoDownloadState.running,
+      );
+      _items.insert(0, item);
+      notifyListeners();
+
+      final expected = choice.size.totalBytes;
+      var received = 0;
+      final sink = File(path).openWrite();
+      try {
+        await for (final chunk in youtube.videos.streams.get(choice)) {
+          if (item.state == VideoDownloadState.cancelled) {
+            throw StateError('다운로드가 취소됐습니다.');
+          }
+          sink.add(chunk);
+          received += chunk.length;
+          if (expected > 0) {
+            final value = (received * 100 ~/ expected).clamp(0, 99);
+            if (item.progress != value) {
+              item.progress = value;
+              notifyListeners();
+            }
+          }
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+      if (received == 0) throw StateError('빈 영상 스트림입니다.');
+      if (item.state == VideoDownloadState.cancelled) {
+        throw StateError('다운로드가 취소됐습니다.');
+      }
+      item.progress = 100;
+      item.state = VideoDownloadState.complete;
+    } catch (error) {
+      if (item == null) rethrow;
+      if (item.state != VideoDownloadState.cancelled) {
+        item.state = VideoDownloadState.failed;
+      }
+      item.error = error.toString();
+      await _deleteIfExists(item.filePath);
+    } finally {
+      youtube.close();
+      notifyListeners();
+    }
+    return item;
+  }
+
   Future<void> cancel(VideoDownloadItem item) async {
     _tokens[item]?.cancel('Cancelled by user');
+    if (item.state == VideoDownloadState.running && !_tokens.containsKey(item)) {
+      item.state = VideoDownloadState.cancelled;
+      notifyListeners();
+    }
   }
 
   Future<void> delete(VideoDownloadItem item) async {

@@ -26,6 +26,8 @@ jobs:
       - name: Validate Android manifest XML
         run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - run: dart format --output=write lib test
       - run: flutter analyze
       - run: flutter test
@@ -47,6 +49,8 @@ jobs:
       - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android .
       - run: python3 tool/prepare_platforms.py
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
@@ -65,9 +69,14 @@ jobs:
           channel: stable
       - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - name: Verify Windows build toolchain
         run: flutter doctor -v
       - run: flutter build windows --release
+      - name: Include verified ByeDPI Windows proxy engine
+        shell: pwsh
+        run: ./tool/install_byedpi.ps1
       - name: Locate or install Inno Setup 6
         shell: pwsh
         run: |

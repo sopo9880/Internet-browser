@@ -70,6 +70,8 @@ jobs:
       - name: Check Python release metadata and signing helpers
         run: python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - run: dart format --output=write lib test
       - run: flutter analyze
       - run: flutter test
@@ -96,6 +98,8 @@ jobs:
         run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android .
       - run: python3 tool/prepare_platforms.py
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - name: Materialize release keystore and configure Gradle
         # Secrets are available ONLY in this trusted, main-branch release job.
         env:
@@ -183,7 +187,12 @@ jobs:
       - name: Generate Windows project
         run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - run: flutter build windows --release
+      - name: Include verified ByeDPI Windows proxy engine
+        shell: pwsh
+        run: ./tool/install_byedpi.ps1
       - name: Find or install Inno Setup 6
         shell: pwsh
         run: |

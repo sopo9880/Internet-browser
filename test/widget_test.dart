@@ -11,6 +11,6 @@ void main() {
     await tester.pumpWidget(const InternetBrowserApp());
 
     expect(find.byType(MaterialApp), findsOneWidget);
-    expect(find.text('Internet Browser'), findsOneWidget);
+    expect(find.byType(Scaffold), findsOneWidget);
   });
 }

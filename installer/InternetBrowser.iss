@@ -11,6 +11,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=sopo9880
 AppPublisherURL=https://github.com/sopo9880/Internet-browser
+SetupIconFile=..\windows\runner\resources\app_icon.ico
 AppSupportURL=https://github.com/sopo9880/Internet-browser/issues
 DefaultDirName={autopf}\Internet Browser
 DefaultGroupName=Internet Browser
