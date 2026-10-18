@@ -36,11 +36,10 @@ bookmarks or app storage. No app-level silent install or elevation.
 
 ## Android signing requirement
 
-The Android CI APK in pull-request artifacts is only a test build.
-Production APK updates MUST be signed with one persistent release keystore
-and a versionCode greater than the installed versionCode. The signing key
-must be configured as a GitHub Actions secret in a separate release
-workflow or in a secure external signing process. Never commit a keystore
+The Android PR CI APK is only a test build. Production APK updates are
+signed by the main-branch release workflow using one persistent PKCS12
+keystore from GitHub Actions Secrets. PR CI does not access release secrets.
+The release workflow also verifies the APK signature. Never commit a keystore
 or ship a debug-signed APK as an official auto-update release.
 
 Android will prompt users to permit installs from this app/source if their
@@ -58,6 +57,73 @@ update APIs instead of side-loading a different certificate.
 5. Verify asset digests, installation and upgrade on real devices.
 6. Release only after the explicit verification/approval workflow.
 
-At the moment no official Releases exist. The updater can be tested with
-an authorized staged release but won't announce anything until a newer
-stable release is published.
+The updater stays quiet until an official stable release exists. Release
+signing and installation must pass Actions and real device verification.
+
+
+## GitHub Actions release secrets (set up once)
+
+| Secret | Purpose |
+| --- | --- |
+| ANDROID_KEYSTORE_BASE64 | Base64 of the same persistent PKCS12 .p12 keystore |
+| ANDROID_KEYSTORE_PASSWORD | PKCS12 store password |
+| ANDROID_KEY_ALIAS | Key alias (e.g. internet_browser_release) |
+| ANDROID_KEY_PASSWORD | Private key password |
+
+These secrets are only passed to the trusted main-branch Android release job.
+They are never used by pull request builds. GitHub Secrets cannot be recovered
+after storage; securely back up the original keystore and its password. Never
+commit the .p12 to source control.
+
+## Release automation
+
+The project has two independent GitHub Actions workflows:
+
+- .github/workflows/ci.yml: PR analysis/tests and test build artifacts.
+  It has no access to Android release secrets.
+- .github/workflows/release.yml: triggers on push to main after the
+  maintainer explicitly verifies and merges a PR, or via manual dispatch
+  from main. It validates versions and reruns tests, builds Windows setup,
+  builds and signs the production APK, verifies the APK signing certificate,
+  creates checksums and publishes both files to GitHub Releases.
+- If a release with the same tag already exists, it does not overwrite it.
+  If either platform build or secret validation fails, no release is posted.
+  Non-0.x versions are intentionally not supported by the metadata script.
+- Both artifacts are built from the SAME main-branch commit. The installer
+  and APK are tagged v0.x.y. SHA256SUMS.txt is included in the release.
+- No release code is executed for pull_request events. Release credentials
+  are decoded into a temporary runner directory, not stored in source.
+- The four Secrets above have not been verified through this conversation:
+  a real production Actions run will test whether they are valid.
+
+## Android versionCode policy
+
+The pubspec.yaml version format is 0.MINOR.PATCH+BUILD (e.g. 0.1.0+1).
+tool/release_metadata.py derives a monotonically increasing versionCode:
+
+    versionCode = MINOR * 1000000 + PATCH * 1000 + BUILD
+
+Use PATCH <= 999, BUILD from 1 to 999 and a MINOR value keeping the code
+within Android's supported range. Release version codes increase whenever
+the semantic app version increases. The application ID stays unchanged.
+
+Production APKs are signed with the persisted release keystore; CI APKs
+are test-only and may use a different certificate. Android may require
+uninstalling an earlier test APK before installing the first production
+release. In-place updates between production releases require using the
+SAME original signing key each time.
+
+## Windows setup and user data
+
+The production workflow uses the existing Inno Setup config with a stable
+AppId. It installs over the previous version without deliberately deleting
+user data. Windows SmartScreen may warn about the EXE because certificate-
+based Windows code signing is not implemented yet; SHA-256 checks verify the
+GitHub-downloaded asset bytes, not publisher identity.
+
+## Final verification
+
+After the release job is triggered, verify successful Actions results,
+release version/tag, actual GitHub Release publication, expected Windows
+installer and signed Android APK, SHA256SUMS and a real-device update.
+A successful CI build alone is not proof of a complete official release.

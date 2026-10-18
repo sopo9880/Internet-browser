@@ -18,6 +18,11 @@ jobs:
       - name: Restore project widget test after Flutter bootstrap
         run: git show HEAD:test/widget_test.dart > test/widget_test.dart
       - run: python3 tool/prepare_platforms.py
+      - name: Test release metadata and signing template (without secrets)
+        run: |
+          python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
+          python3 tool/release_metadata.py
+          python3 tool/configure_android_signing.py
       - name: Validate Android manifest XML
         run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get

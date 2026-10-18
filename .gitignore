@@ -21,3 +21,8 @@ windows/
 *.keystore
 key.properties
 .env
+
+# Never commit Android release keys
+*.p12
+*.pfx
+*.pkcs12
