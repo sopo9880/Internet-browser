@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:package_info_plus/package_info_plus.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -8,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'ad_blocker.dart';
 import 'address_parser.dart';
 import 'download_manager.dart';
+import 'update_dialogs.dart';
+import 'update_service.dart';
 import 'video_detector.dart';
 
 class BrowserTab {
@@ -33,6 +37,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   final _address = TextEditingController();
   final _downloads = VideoDownloadManager();
   final _ads = AdBlocker();
+  final _updates = BrowserUpdateService();
+  bool _checkingForUpdates = false;
   final _tabs = <BrowserTab>[];
   final _bookmarks = <String>[];
   final _history = <String>[];
@@ -69,7 +75,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _environment = await WebViewEnvironment.create();
       }
       await _downloads.loadSaved();
-      if (mounted) setState(() => _ready = true);
+      if (mounted) {
+        setState(() => _ready = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _checkForUpdates(automatic: true);
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -79,6 +90,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void dispose() {
     _address.dispose();
     _downloads.dispose();
+    _updates.dispose();
     _environment?.dispose();
     super.dispose();
   }
@@ -88,6 +100,53 @@ class _BrowserScreenState extends State<BrowserScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(text), duration: const Duration(seconds: 3)),
     );
+  }
+
+
+  /// Startup checks are quiet when offline and throttled to protect GitHub's
+  /// unauthenticated API limit. Manual checks always bypass the throttle and
+  /// any seven-day snooze.
+  Future<void> _checkForUpdates({required bool automatic}) async {
+    if (_checkingForUpdates) return;
+    final preferences = _prefs;
+    final platform = BrowserUpdateService.runningPlatform;
+    if (preferences == null || platform == null) {
+      if (!automatic) _message('현재 플랫폼에서 업데이트 확인을 지원하지 않습니다.');
+      return;
+    }
+    if (automatic && !_updates.shouldCheckAutomatically(preferences)) return;
+
+    _checkingForUpdates = true;
+    try {
+      final app = await PackageInfo.fromPlatform();
+      final release = await _updates.checkLatest(
+        installedVersion: app.version,
+        platform: platform,
+      );
+      if (automatic) {
+        await _updates.rememberSuccessfulCheck(preferences);
+      }
+      if (!mounted) return;
+      if (release == null) {
+        if (!automatic) {
+          _message('현재 최신 버전이거나 게시된 정식 릴리스가 없습니다.');
+        }
+        return;
+      }
+      if (automatic && _updates.isSnoozed(preferences, release)) return;
+      await showBrowserUpdatePrompt(
+        context: context,
+        update: release,
+        service: _updates,
+        preferences: preferences,
+      );
+    } catch (error) {
+      if (!automatic && mounted) {
+        _message('업데이트 확인에 실패했습니다: $error');
+      }
+    } finally {
+      _checkingForUpdates = false;
+    }
   }
 
   void _syncAddress() {
@@ -461,6 +520,25 @@ class _BrowserScreenState extends State<BrowserScreen> {
                           },
                   ),
                   const Divider(),
+                  SwitchListTile(
+                    title: const Text('시작할 때 업데이트 확인'),
+                    subtitle: const Text('정식 릴리스 확인, 최대 12시간마다'),
+                    value: _prefs?.getBool('update_auto_check') ?? true,
+                    onChanged: (value) {
+                      _prefs?.setBool('update_auto_check', value);
+                      update(() {});
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.system_update_outlined),
+                    title: const Text('지금 업데이트 확인'),
+                    subtitle: const Text('GitHub Releases에서 최신 버전 확인'),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      _checkForUpdates(automatic: false);
+                    },
+                  ),
+                  const Divider(),
                   const ListTile(
                     leading: Icon(Icons.shield_outlined),
                     title: Text('DPI 우회'),
@@ -471,7 +549,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ),
                   const ListTile(
                     leading: Icon(Icons.info_outline),
-                    title: Text('Internet Browser v0.1.0'),
+                    title: Text('Internet Browser'),
                     subtitle: Text(
                       '기본 광고 필터는 전체 EasyList 규칙을 지원하지 않습니다.',
                     ),

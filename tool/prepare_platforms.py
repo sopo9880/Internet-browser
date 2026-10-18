@@ -15,12 +15,19 @@ if not manifest.exists():
     raise SystemExit("AndroidManifest.xml missing; run flutter create first.")
 
 source = manifest.read_text(encoding="utf-8")
-permission = '<uses-permission android:name="android.permission.INTERNET" />'
-if "android.permission.INTERNET" not in source:
+permissions = {
+    "android.permission.INTERNET": '<uses-permission android:name="android.permission.INTERNET" />',
+    "android.permission.REQUEST_INSTALL_PACKAGES": (
+        '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
+    ),
+}
+for name, declaration in permissions.items():
+    if name in source:
+        continue
     opening = re.search(r"<manifest\b[^>]*>", source)
     if opening is None:
         raise SystemExit("AndroidManifest.xml has no manifest root.")
-    source = source[:opening.end()] + "\n    " + permission + source[opening.end():]
+    source = source[:opening.end()] + "\n    " + declaration + source[opening.end():]
 
 try:
     root = ET.fromstring(source)
