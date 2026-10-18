@@ -52,7 +52,7 @@ if 'BrowserPlaybackService' not in source:
 # generated wrappers are ignored and regenerated in each CI job.
 package_dir = Path('android/app/src/main/kotlin/io/github/sopo9880/internet_browser')
 package_dir.mkdir(parents=True, exist_ok=True)
-for filename in ('MainActivity.kt', 'BrowserPlaybackService.kt'):
+for filename in ('MainActivity.kt', 'BrowserPlaybackService.kt', 'EmbeddedChromiumRuntime.kt'):
     origin = Path('tool/android') / filename
     if not origin.is_file():
         raise SystemExit(f'Missing native Android template: {origin}')
@@ -65,6 +65,38 @@ if app_gradle.exists():
         insertion = '    packaging {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }\n'
         gradle = gradle.replace('android {', 'android {\n' + insertion, 1)
     app_gradle.write_text(gradle, encoding='utf-8')
+
+# Chromium is no longer an external Chrome APK or WebView replacement intent.
+# When a custom Chromium embedder library exists, statically link it INSIDE
+# this app and verify its exact content hash and provider class.
+engine_aar_env = os.environ.get("BROWSER_ANDROID_CHROMIUM_AAR")
+engine_digest = os.environ.get("BROWSER_ANDROID_CHROMIUM_AAR_SHA256")
+if engine_aar_env:
+    if not engine_digest:
+        raise SystemExit(
+            "CHROMIUM_AAR set without BROWSER_ANDROID_CHROMIUM_AAR_SHA256"
+        )
+    from chromium.verify_runtime import verify_aar
+    import shutil
+
+    source_aar = Path(engine_aar_env).resolve()
+    try:
+        verify_aar(source_aar, engine_digest)
+    except (ValueError, FileNotFoundError) as exc:
+        raise SystemExit(f"Chromium embedder AAR verification failed: {exc}")
+    target_aar = Path("android/app/libs/chromium-engine.aar")
+    target_aar.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source_aar, target_aar)
+    if not app_gradle.exists():
+        raise SystemExit("Missing Gradle app file for Chromium engine linking")
+    gradle = app_gradle.read_text(encoding="utf-8")
+    dep = 'implementation(files("libs/chromium-engine.aar"))'
+    if dep not in gradle:
+        gradle += '\ndependencies {\n    ' + dep + '\n}\n'
+        app_gradle.write_text(gradle, encoding="utf-8")
+    print("Verified and linked Chromium embedder AAR; runtime validation pending")
+elif engine_digest:
+    raise SystemExit("Chromium engine SHA supplied without its AAR path")
 
 try:
     root = ET.fromstring(source)

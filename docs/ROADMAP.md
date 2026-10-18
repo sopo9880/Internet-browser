@@ -38,3 +38,18 @@ Build both EXE bundle and APK against the same SHA, verify on real devices, and 
   functionality after migration.
 - CI and release must remain blocked until this gate passes. The initially
   integrated Flutter WebView interface is a clearly labeled placeholder.
+
+
+## Chromium-first priority order
+
+1. Build a modern upstream Android Chromium baseline on a dedicated runner,
+   then port an in-app native embedder with Chrome MV3 extensions.
+2. Verify actual installation and network blocking by Chrome Web Store
+   AdBlock gighmmpiobklfepjocnamgkkbiglidom.
+3. Reconnect native Chromium to ByeDPI, navigation, downloads and offline
+   video metadata; protect existing app data, Android signing and Windows.
+4. Run the integrated device test suite and only then release v0.2.0.
+
+The Android development app now deliberately blocks WebView fallback while
+Chromium is not linked. A stock Chromium APK or build script does not pass
+the mandatory AdBlock device test.

@@ -49,3 +49,17 @@ v0.1.2 development PR is reused rather than rebased into a second PR.
   persistence. A green Android APK build is NOT extension support.
 - See docs/ANDROID_CHROMIUM_EXTENSIONS.md for the engine migration and proof
   required. Never mark this release complete without that evidence.
+
+
+### Android Chromium-first migration
+
+The v0.2.0 Android development branch now routes the browser surface to a
+native Chromium embedder interface instead of Android WebView. Until the
+extension-capable native engine is supplied, Android shows an unavailable
+engine message. Windows remains on WebView2.
+
+Build instructions and native engine integration requirements are in
+docs/ANDROID_CHROMIUM_EXTENSIONS.md. The upstream build script
+tool/chromium/build_android.sh produces only a STOCK Chromium baseline,
+not a Chrome Web Store extension-capable browser. AdBlock is not working
+until actual native engine integration and physical-device verification.

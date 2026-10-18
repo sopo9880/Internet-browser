@@ -1,0 +1,40 @@
+name: Chromium Android baseline prototype
+on:
+  workflow_dispatch:
+    inputs:
+      chromium_revision:
+        description: Full verified upstream Chromium commit SHA (40 hex)
+        required: true
+        type: string
+      cpu:
+        description: Android CPU
+        required: true
+        default: arm64
+        type: choice
+        options: [arm64, x64]
+permissions:
+  contents: read
+jobs:
+  chromium_android_baseline:
+    runs-on: [self-hosted, linux, x64, chromium-large]
+    timeout-minutes: 240
+    env:
+      CHROMIUM_REVISION: ${{ inputs.chromium_revision }}
+      CHROMIUM_CPU: ${{ inputs.cpu }}
+      CHROMIUM_WORKSPACE: ${{ runner.temp }}/internet-browser-chromium
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Chromium bootstrap
+        run: |
+          python3 -m unittest discover -s tool/tests -p test_chromium_bootstrap.py -v
+          bash -n tool/chromium/build_android.sh
+      - name: Build stock upstream Chromium Android baseline - NOT AdBlock
+        run: bash tool/chromium/build_android.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chromium-baseline-NOT-extension-compatible
+          path: |
+            ${{ runner.temp }}/internet-browser-chromium/chromium-baseline/baseline.json
+            ${{ runner.temp }}/internet-browser-chromium/chromium-baseline/ChromePublic-stock-NOT-EXTENSIONS.apk
+          retention-days: 3
+          if-no-files-found: error

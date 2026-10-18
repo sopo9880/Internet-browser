@@ -99,8 +99,8 @@ class _ChromeExtensionsScreenState extends State<ChromeExtensionsScreen> {
                             : 'Chromium 확장 엔진 미통합'),
                         subtitle: Text(caps.canLoadAdBlock
                             ? (_installed ? 'AdBlock 설치 확인' : '확장 설치 필요')
-                            : '현재 Android WebView에서는 이 Chrome 확장을 실행할 수 없습니다. '
-                              'Chromium Android 엔진과 MV3 API 연동이 선행되어야 합니다.'),
+                            : '앱 내 Chromium 네이티브 엔진이 연결되지 않았습니다. '
+                              'Manifest V3·광고 차단 API 이식이 필요합니다.'),
                         leading: Icon(
                           caps.canLoadAdBlock
                               ? Icons.check_circle_outline

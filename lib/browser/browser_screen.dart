@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -9,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ad_blocker.dart';
 import 'chrome_extensions_screen.dart';
+import 'chromium_navigation.dart';
 import 'address_parser.dart';
 import 'download_manager.dart';
 import 'dpi_proxy.dart';
@@ -43,6 +45,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   final _address = TextEditingController();
   final _addressFocus = FocusNode();
   final _dpi = BrowserDpiProxy();
+  final _chromium = ChromiumNavigation();
+  StreamSubscription<ChromiumNavigationEvent>? _chromiumEvents;
+  bool _chromiumReady = false;
+  bool get _usesChromium => defaultTargetPlatform == TargetPlatform.android;
   DpiOptions _dpiOptions = const DpiOptions();
   final _library = VideoLibrary();
   bool _chromeVisible = true;
@@ -82,10 +88,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _ads.allowedHosts.addAll(prefs.getStringList('ads_exceptions') ?? []);
       _bookmarks.addAll(prefs.getStringList('bookmarks') ?? []);
       _history.addAll(prefs.getStringList('history') ?? []);
-      final proxyConnected = await _dpi.initialize(
-        enabled: prefs.getBool('dpi_enabled') ?? false,
-        options: _dpiOptions,
-      );
+      // v0.2.0 Android intentionally targets an app-embedded Chromium
+      // engine. Never configure WebView's proxy or fall back to WebView.
+      bool proxyConnected = false;
+      if (_usesChromium) {
+        final engine = await _chromium.status();
+        _chromiumReady = engine.ready;
+        if (_chromiumReady) {
+          _chromiumEvents = _chromium.events.listen(_onChromiumEvent);
+        }
+      } else {
+        proxyConnected = await _dpi.initialize(
+          enabled: prefs.getBool('dpi_enabled') ?? false,
+          options: _dpiOptions,
+        );
+      }
       if (defaultTargetPlatform == TargetPlatform.windows) {
         final version = await WebViewEnvironment.getAvailableVersion();
         if (version == null) {
@@ -118,6 +135,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _address.dispose();
     _addressFocus.dispose();
     _dpi.dispose();
+    unawaited(_chromiumEvents?.cancel());
     _downloads.dispose();
     _library.dispose();
     _updates.dispose();
@@ -261,6 +279,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final tab = _tab;
     tab.uri = uri;
     _syncAddress();
+    if (_usesChromium) {
+      if (!_chromiumReady) {
+        _message('Android Chromium 엔진이 아직 연결되지 않았습니다.');
+        return;
+      }
+      try {
+        await _chromium.navigate(tab.id, uri);
+      } catch (error) {
+        _message('Chromium 탐색 실패: $error');
+      }
+      return;
+    }
     if (tab.controller == null) {
       setState(() => tab.initialUri = uri);
       return;
@@ -275,6 +305,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _back() async {
+    if (_usesChromium) {
+      if (_chromiumReady && await _chromium.canBack(_tab.id)) {
+        await _chromium.back(_tab.id);
+      } else if (_tabs.length > 1) {
+        _closeTab(_selected);
+      }
+      return;
+    }
     final controller = _tab.controller;
     if (controller != null && await controller.canGoBack()) {
       await controller.goBack();
@@ -284,22 +322,91 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _forward() async {
+    if (_usesChromium) {
+      if (_chromiumReady && await _chromium.canForward(_tab.id)) {
+        await _chromium.forward(_tab.id);
+      }
+      return;
+    }
     final controller = _tab.controller;
     if (controller != null && await controller.canGoForward()) {
       await controller.goForward();
     }
   }
 
-  Future<void> _reload() async => _tab.controller?.reload();
+  Future<void> _reload() async {
+    if (_usesChromium) {
+      if (_chromiumReady) await _chromium.reload(_tab.id);
+      return;
+    }
+    await _tab.controller?.reload();
+  }
 
-  void _updateLocation(BrowserTab tab, WebUri? webUri) {
-    if (!mounted || !_tabs.contains(tab) || webUri == null) return;
-    final uri = Uri.tryParse(webUri.toString());
-    if (uri == null || !AddressParser.isRemoteHttp(uri)) return;
+  void _updateLocationUri(BrowserTab tab, Uri? uri) {
+    if (!mounted || !_tabs.contains(tab) || uri == null) return;
+    if (!AddressParser.isRemoteHttp(uri)) return;
     setState(() {
       tab.uri = uri;
       if (identical(tab, _tab)) _syncAddress();
     });
+  }
+
+  void _updateLocation(BrowserTab tab, WebUri? webUri) {
+    final uri = webUri == null ? null : Uri.tryParse(webUri.toString());
+    _updateLocationUri(tab, uri);
+  }
+
+  /// The native Chromium module emits the same browsing events as WebView2.
+  /// A missing engine emits none and the Android UI stays explicitly blocked.
+  void _onChromiumEvent(ChromiumNavigationEvent event) {
+    if (!mounted) return;
+    BrowserTab? tab;
+    for (final candidate in _tabs) {
+      if (candidate.id == event.tabId) {
+        tab = candidate;
+        break;
+      }
+    }
+    if (tab == null) return;
+    final activeTab = tab;
+    switch (event.type) {
+      case 'url':
+        _updateLocationUri(activeTab, event.url);
+      case 'title':
+        if (event.title != null) {
+          setState(() => activeTab.title = event.title!);
+        }
+      case 'progress':
+        if (event.progress != null) {
+          setState(() =>
+              activeTab.progress = event.progress!.clamp(0, 100).toInt());
+        }
+      case 'loadStarted':
+        setState(() {
+          activeTab.progress = 0;
+          activeTab.videos.clear();
+        });
+        _updateLocationUri(activeTab, event.url);
+      case 'loadFinished':
+        _updateLocationUri(activeTab, event.url);
+        unawaited(_pageFinished(activeTab));
+      case 'resource':
+        final uri = event.url;
+        if (uri != null) _newMediaUrl(activeTab, uri.toString());
+      case 'pointerDown':
+        _dismissAddressEditor();
+      case 'scroll':
+        final y = event.payload['y'];
+        if (y is num && identical(activeTab, _tab)) _onWebScroll(y.toInt());
+    }
+  }
+
+  Future<dynamic> _evaluatePageScript(BrowserTab tab, String source) async {
+    if (_usesChromium) {
+      if (!_chromiumReady) return null;
+      return _chromium.javascript(tab.id, source);
+    }
+    return tab.controller?.evaluateJavascript(source: source);
   }
 
   void _saveHistory(Uri uri) {
@@ -334,10 +441,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _detectMedia(BrowserTab tab) async {
-    if (tab.controller == null) return;
+    if (_usesChromium && !_chromiumReady) return;
+    if (!_usesChromium && tab.controller == null) return;
     try {
-      dynamic result = await tab.controller!.evaluateJavascript(
-        source: VideoDetector.discoverScript,
+      dynamic result = await _evaluatePageScript(
+        tab, VideoDetector.discoverScript,
       );
       if (result is String) {
         try {
@@ -358,19 +466,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _saveHistory(tab.uri);
     if (_ads.enabled && !_ads.isExempt(tab.uri)) {
       try {
-        await tab.controller?.evaluateJavascript(
-          source: AdBlocker.cosmeticScript,
-        );
+        await _evaluatePageScript(tab, AdBlocker.cosmeticScript);
         if (AdBlocker.isYoutube(tab.uri)) {
-          await tab.controller?.evaluateJavascript(
-            source: AdBlocker.youtubeCleanupScript,
-          );
+          await _evaluatePageScript(tab, AdBlocker.youtubeCleanupScript);
         }
       } catch (_) {}
     }
     await _detectMedia(tab);
     try {
-      await tab.controller?.evaluateJavascript(source: r'''
+      if (!_usesChromium) await _evaluatePageScript(tab, r'''
 (function() {
  if (window.__internetBrowserFocusInstalled) return;
  window.__internetBrowserFocusInstalled = true;
@@ -387,9 +491,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Future<VideoPageMetadata> _readPageMetadata(BrowserTab tab) async {
     dynamic value;
     try {
-      value = await tab.controller?.evaluateJavascript(
-        source: VideoPageMetadata.discoverScript,
-      );
+      value = await _evaluatePageScript(tab, VideoPageMetadata.discoverScript);
     } catch (_) {}
     return VideoPageMetadata.parse(
       value, tab.uri, fallbackTitle: tab.title,
@@ -917,18 +1019,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   }
                   await candidate.save(prefs);
                   _dpiOptions = candidate;
-                  if (defaultTargetPlatform == TargetPlatform.android &&
+                  // Android Chromium does not use the WebView proxy API.
+                  if (_usesChromium &&
                       (prefs.getBool('dpi_enabled') ?? false)) {
-                    await _dpi.disableAndroid();
-                    await _dpi.initialize(enabled: true, options: candidate);
-                    await _reload();
+                    _message('Chromium 네트워크 프록시 연결 구현 후 적용됩니다.');
                   }
                   if (mounted) {
                     setState(() {});
                     if (dialog.mounted) Navigator.pop(dialog);
                     _message(defaultTargetPlatform == TargetPlatform.windows
                         ? '설정 저장 완료. Windows 재시작 후 적용됩니다.'
-                        : _dpi.status);
+                        : 'Android Chromium 프록시 연동 대기 · 설정 저장됨');
                   }
                 },
                 child: const Text('저장 및 적용'),
@@ -1005,22 +1106,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   SwitchListTile(
                     secondary: const Icon(Icons.shield_outlined),
                     title: const Text('ByeDPI 우회 엔진'),
-                    subtitle: Text(_dpi.status +
-                        (defaultTargetPlatform == TargetPlatform.windows
-                            ? '\nWindows: 변경 후 앱 재시작 필요'
-                            : '\nAndroid: 앱에 포함된 ByeDPI 엔진 사용')),
+                    subtitle: Text(_usesChromium
+                        ? 'Android Chromium 네트워크 우회 엔진 연결 대기 · 설정값 저장 가능'
+                        : _dpi.status + '\nWindows: 변경 후 앱 재시작 필요'),
                     value: _prefs?.getBool('dpi_enabled') ?? false,
                     onChanged: (value) async {
                       await _prefs?.setBool('dpi_enabled', value);
-                      if (defaultTargetPlatform == TargetPlatform.android) {
-                        if (value) {
-                          await _dpi.initialize(
-                            enabled: true, options: _dpiOptions,
-                          );
-                        } else {
-                          await _dpi.disableAndroid();
-                        }
-                        await _reload();
+                      if (_usesChromium) {
+                        _message('Android Chromium 프록시 연동 전까지 설정만 저장합니다.');
                       } else {
                         _message('Windows DPI 변경사항은 앱 재시작 후 적용됩니다.');
                       }
@@ -1046,7 +1139,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ListTile(
                     leading: const Icon(Icons.info_outline),
                     title: const Text('DPI 연결 상태'),
-                    subtitle: Text(_dpi.status),
+                    subtitle: Text(_usesChromium
+                        ? 'Chromium 엔진 네트워크 계층 연결 미완료'
+                        : _dpi.status),
                   ),
                   const ListTile(
                     leading: Icon(Icons.info_outline),
@@ -1352,6 +1447,44 @@ class _BrowserScreenState extends State<BrowserScreen> {
         },
       );
 
+  Widget _engineView(BrowserTab tab) {
+    if (!_usesChromium) return _webView(tab);
+    if (!_chromiumReady) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.extension_off_outlined, size: 48),
+              const SizedBox(height: 12),
+              const Text(
+                'Android Chromium 엔진 이식 중',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '현재 개발 빌드에는 확장 프로그램을 실행하는 Chromium '
+                '네이티브 엔진이 포함되지 않았습니다. WebView로 자동 대체하지 '
+                '않으며 AdBlock 호환성 검증 전에는 릴리스하지 않습니다.',
+                textAlign: TextAlign.center,
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => const ChromeExtensionsScreen(),
+                  ),
+                ),
+                child: const Text('확장 엔진 상태 보기'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return ChromiumAndroidPage(tabId: tab.id, url: tab.initialUri);
+  }
+
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width > 680;
@@ -1384,7 +1517,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                                   onPointerDown: (_) => _dismissAddressEditor(),
                                   child: IndexedStack(
                                     index: _selected,
-                                    children: _tabs.map(_webView).toList(),
+                                    children: _tabs.map(_engineView).toList(),
                                   ),
                                 ),
                               ),

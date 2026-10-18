@@ -55,3 +55,12 @@ Store install, permission prompts, extension action/popup, persistence, and
 validation of existing ByeDPI, library and player features. CI intentionally
 fails its Android AdBlock acceptance job until this evidence is provided by a
 real physical-device test. Do not manually override it.
+
+
+### Chromium network transport (v0.2.0 in progress)
+
+Android now uses a native Chromium engine interface rather than a WebView
+browsing surface. Saved ByeDPI preferences remain, but the old Android
+WebView proxy override is not used. The Chromium network context must
+be adapted to the local SOCKS5 proxy before claiming DPI bypass.
+The offline video library and files retain their existing storage path.

@@ -15,40 +15,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private var playbackActive = false
+    private var chromiumRuntime: EmbeddedChromiumRuntime? = null
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         val channel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
         callback = channel
-        // WebView deliberately exposes NO extension installation support.
-        // Replace this channel only after the app owns an independently
-        // maintained extension-capable Chromium Android runtime.
-        MethodChannel(
-            engine.dartExecutor.binaryMessenger,
-            "internet_browser/chromium_extensions"
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "capabilities" -> result.success(mapOf(
-                    "engine" to "android-webview",
-                    "nativeEngine" to false,
-                    "manifestV3" to false,
-                    "declarativeNetRequest" to false,
-                    "serviceWorkers" to false,
-                    "permissionPrompts" to false,
-                    "chromeWebStoreInstall" to false,
-                    "actionPopup" to false
-                ))
-                "isInstalledAndEnabled" -> result.success(false)
-                "installFromChromeWebStore", "uninstall" ->
-                    result.error(
-                        "CHROMIUM_REQUIRED",
-                        "Chrome extensions require a native Chromium engine; " +
-                            "Android WebView cannot install or execute CRX.",
-                        null
-                    )
-                else -> result.notImplemented()
-            }
-        }
+        chromiumRuntime = EmbeddedChromiumRuntime(this).also { it.register(engine) }
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getNativeLibraryDir" -> result.success(applicationInfo.nativeLibraryDir)
@@ -117,6 +90,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        chromiumRuntime?.dispose()
+        chromiumRuntime = null
         callback = null
         super.onDestroy()
     }
