@@ -104,17 +104,39 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: python3 tool/configure_android_signing.py --write
-      - name: Verify keystore alias is accessible
+      - name: Diagnose Android keystore and alias safely
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         shell: bash
         run: |
           set -euo pipefail
-          keytool -list -storetype PKCS12 \
-            -keystore "$RUNNER_TEMP/internet-browser-release.p12" \
+          KEYSTORE="$RUNNER_TEMP/internet-browser-release.p12"
+          if [ ! -s "$KEYSTORE" ]; then
+            echo "::error title=Android keystore::Decoded keystore file is missing or empty."
+            exit 1
+          fi
+          if ! keytool -list -storetype PKCS12 \
+            -keystore "$KEYSTORE" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD >/dev/null 2>&1; then
+            echo "::error title=Android keystore password::Unable to open PKCS12 with ANDROID_KEYSTORE_PASSWORD. Verify the original .p12, Base64 secret and store password."
+            exit 1
+          fi
+          if ! keytool -list -storetype PKCS12 \
+            -keystore "$KEYSTORE" \
             -storepass:env ANDROID_KEYSTORE_PASSWORD \
-            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error title=Android key alias::ANDROID_KEY_ALIAS does not match an alias in the PKCS12 keystore. Check the original keystore's alias locally and update the repository secret."
+            exit 1
+          fi
+          if ! keytool -list -storetype PKCS12 \
+            -keystore "$KEYSTORE" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            -alias "$ANDROID_KEY_ALIAS" | grep -q 'PrivateKeyEntry'; then
+            echo "::error title=Android key entry::The configured alias does not reference a signing private key."
+            exit 1
+          fi
+          echo "Android signing keystore, password and private-key alias verified."
       - name: Build production-signed Android APK
         env:
           ANDROID_RELEASE_KEYSTORE_FILE: ${{ runner.temp }}/internet-browser-release.p12
