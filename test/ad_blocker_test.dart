@@ -26,6 +26,12 @@ void main() {
     final site = Uri.parse('https://doubleclick.net/');
     expect(blocker.shouldBlock(site, page: site), isFalse);
   });
+  test('YouTube cleanup is restricted to genuine YouTube origins', () {
+    expect(AdBlocker.isYoutube(Uri.parse('https://www.youtube.com/watch')), isTrue);
+    expect(AdBlocker.isYoutube(Uri.parse('https://m.youtube.com/shorts/x')), isTrue);
+    expect(AdBlocker.isYoutube(Uri.parse('https://youtube.com.evil.test/watch')), isFalse);
+    expect(AdBlocker.youtubeCleanupScript.contains('ytp-ad-skip-button'), isTrue);
+  });
   test('site exemption disables filtering for that site', () {
     final blocker = AdBlocker(allowedHosts: ['example']);
     expect(

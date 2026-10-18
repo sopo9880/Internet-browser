@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'ad_blocker.dart';
 import 'address_parser.dart';
 import 'download_manager.dart';
+import 'dpi_proxy.dart';
 import 'update_dialogs.dart';
 import 'update_service.dart';
 import 'video_detector.dart';
@@ -35,6 +36,12 @@ class BrowserScreen extends StatefulWidget {
 
 class _BrowserScreenState extends State<BrowserScreen> {
   final _address = TextEditingController();
+  final _addressFocus = FocusNode();
+  final _dpi = BrowserDpiProxy();
+  bool _chromeVisible = true;
+  bool _showTabStrip = false;
+  int _previousScrollY = 0;
+  int _scrollDistance = 0;
   final _downloads = VideoDownloadManager();
   final _ads = AdBlocker();
   final _updates = BrowserUpdateService();
@@ -67,12 +74,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _ads.allowedHosts.addAll(prefs.getStringList('ads_exceptions') ?? []);
       _bookmarks.addAll(prefs.getStringList('bookmarks') ?? []);
       _history.addAll(prefs.getStringList('history') ?? []);
+      final proxyConnected = await _dpi.initialize(
+        enabled: prefs.getBool('dpi_enabled') ?? false,
+      );
       if (defaultTargetPlatform == TargetPlatform.windows) {
         final version = await WebViewEnvironment.getAvailableVersion();
         if (version == null) {
           throw StateError('Microsoft Edge WebView2 Runtime is required.');
         }
-        _environment = await WebViewEnvironment.create();
+        _environment = await WebViewEnvironment.create(
+          settings: proxyConnected
+              ? WebViewEnvironmentSettings(
+                  additionalBrowserArguments:
+                      BrowserDpiProxy.windowsProxyArguments,
+                )
+              : null,
+        );
       }
       await _downloads.loadSaved();
       if (mounted) {
@@ -89,6 +106,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   @override
   void dispose() {
     _address.dispose();
+    _addressFocus.dispose();
+    _dpi.dispose();
     _downloads.dispose();
     _updates.dispose();
     _environment?.dispose();
@@ -150,14 +169,47 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _syncAddress() {
+    if (_addressFocus.hasFocus) return;
     final text = _tab.uri.toString();
+    if (_address.text == text) return;
     _address.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: text.length),
     );
   }
 
+  Future<void> _submitAddress(String input) async {
+    _addressFocus.unfocus();
+    await _go(input);
+  }
+
+  void _onWebScroll(int y) {
+    if (!mounted || _addressFocus.hasFocus) return;
+    final delta = y - _previousScrollY;
+    _previousScrollY = y;
+    if (y < 18 && !_chromeVisible) {
+      setState(() => _chromeVisible = true);
+      _scrollDistance = 0;
+      return;
+    }
+    if (delta == 0) return;
+    if (_scrollDistance.sign != delta.sign) _scrollDistance = 0;
+    _scrollDistance += delta;
+    if (_scrollDistance > 52 && _chromeVisible && y > 100) {
+      setState(() => _chromeVisible = false);
+      _scrollDistance = 0;
+    } else if (_scrollDistance < -42 && !_chromeVisible) {
+      setState(() => _chromeVisible = true);
+      _scrollDistance = 0;
+    }
+  }
+
+  void _revealChrome() => setState(() => _chromeVisible = true);
+
+
   void _addTab([Uri? url]) {
+    _addressFocus.unfocus();
+    _revealChrome();
     setState(() {
       _tabs.add(BrowserTab(_nextId++, url ?? Uri.parse(AddressParser.home)));
       _selected = _tabs.length - 1;
@@ -166,6 +218,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _selectTab(int index) {
+    _addressFocus.unfocus();
+    _revealChrome();
     setState(() {
       _selected = index;
       _syncAddress();
@@ -173,6 +227,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _closeTab(int index) {
+    _addressFocus.unfocus();
     if (_tabs.length == 1) {
       _go(AddressParser.home);
       return;
@@ -290,6 +345,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
         await tab.controller?.evaluateJavascript(
           source: AdBlocker.cosmeticScript,
         );
+        if (AdBlocker.isYoutube(tab.uri)) {
+          await tab.controller?.evaluateJavascript(
+            source: AdBlocker.youtubeCleanupScript,
+          );
+        }
       } catch (_) {}
     }
     await _detectMedia(tab);
@@ -313,13 +373,69 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
+  Future<void> _downloadYoutube(Uri page) async {
+    var confirmed = false;
+    final permitted = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('YouTube 영상 저장'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '저장 권한이 있는 영상만 다운로드하세요. '
+                '음성과 영상이 결합된 스트림은 일반적으로 최대 360p입니다. '
+                '일부 영상은 스트림을 제공하지 않을 수 있습니다.',
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('이 영상의 저장 권한을 확인했습니다'),
+                value: confirmed,
+                onChanged: (value) => update(
+                  () => confirmed = value ?? false,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: confirmed
+                  ? () => Navigator.pop(dialog, true)
+                  : null,
+              child: const Text('저장 시작'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (permitted != true || !mounted) return;
+    _message('YouTube 영상 스트림 확인 및 다운로드를 시작했습니다.');
+    try {
+      final item = await _downloads.downloadYoutube(page);
+      if (!mounted) return;
+      if (item.state == VideoDownloadState.complete) {
+        _message('영상 다운로드 완료: ${item.fileName}');
+      } else if (item.state == VideoDownloadState.failed) {
+        _message('영상 저장 실패: ${item.error ?? '원인을 확인하세요.'}');
+      }
+    } catch (error) {
+      _message('YouTube 스트림 확인 실패: $error');
+    }
+  }
+
   Future<void> _showVideos() async {
     final tab = _tab;
     await _detectMedia(tab);
     if (!mounted) return;
     final urls = tab.videos.toList();
-    if (urls.isEmpty) {
-      _message('이 페이지에서 직접 저장 가능한 영상을 찾지 못했습니다.');
+    final youtubeId = VideoDetector.youtubeVideoId(tab.uri);
+    if (urls.isEmpty && youtubeId == null) {
+      _message('저장 가능한 직접 영상 또는 YouTube 영상 페이지를 찾지 못했습니다.');
       return;
     }
     await showModalBottomSheet<void>(
@@ -332,26 +448,41 @@ class _BrowserScreenState extends State<BrowserScreen> {
             children: [
               const ListTile(
                 title: Text('영상 다운로드'),
-                subtitle: Text('다운로드 허용된 직접 연결 영상만 지원'),
+                subtitle: Text('저장 권한이 있는 콘텐츠만 다운로드하세요'),
               ),
               Expanded(
                 child: ListView.builder(
-                  itemCount: urls.length,
-                  itemBuilder: (_, i) => ListTile(
-                    leading: const Icon(Icons.movie_outlined),
-                    title: Text(
-                      urls[i].pathSegments.isEmpty
-                          ? '동영상'
-                          : urls[i].pathSegments.last,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(urls[i].host),
-                    trailing: const Icon(Icons.download_outlined),
-                    onTap: () {
-                      Navigator.pop(sheet);
-                      _download(urls[i]);
-                    },
-                  ),
+                  itemCount: urls.length + (youtubeId == null ? 0 : 1),
+                  itemBuilder: (_, i) {
+                    if (youtubeId != null && i == 0) {
+                      return ListTile(
+                        leading: const Icon(Icons.smart_display_outlined),
+                        title: const Text('현재 YouTube 영상 저장'),
+                        subtitle: const Text('가능한 음성+영상 통합 스트림'),
+                        trailing: const Icon(Icons.download_outlined),
+                        onTap: () {
+                          Navigator.pop(sheet);
+                          _downloadYoutube(tab.uri);
+                        },
+                      );
+                    }
+                    final index = youtubeId == null ? i : i - 1;
+                    return ListTile(
+                      leading: const Icon(Icons.movie_outlined),
+                      title: Text(
+                        urls[index].pathSegments.isEmpty
+                            ? '동영상'
+                            : urls[index].pathSegments.last,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(urls[index].host),
+                      trailing: const Icon(Icons.download_outlined),
+                      onTap: () {
+                        Navigator.pop(sheet);
+                        _download(urls[index]);
+                      },
+                    );
+                  },
                 ),
               ),
             ],
@@ -539,13 +670,36 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     },
                   ),
                   const Divider(),
-                  const ListTile(
-                    leading: Icon(Icons.shield_outlined),
-                    title: Text('DPI 우회'),
-                    subtitle: Text(
-                      '네이티브 엔진 미연결: 현재 우회 기능은 동작하지 '
-                      '않습니다. Windows/Android 연결 테스트 후 추가 예정.',
-                    ),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.shield_outlined),
+                    title: const Text('DPI 우회 · 로컬 SOCKS5'),
+                    subtitle: Text(_dpi.status +
+                        (defaultTargetPlatform == TargetPlatform.windows
+                            ? '\nWindows: 변경 후 앱 재시작 필요'
+                            : '\nAndroid: ByeDPI SOCKS5 서버 별도 실행 필요')),
+                    value: _prefs?.getBool('dpi_enabled') ?? false,
+                    onChanged: (value) async {
+                      await _prefs?.setBool('dpi_enabled', value);
+                      if (defaultTargetPlatform == TargetPlatform.android) {
+                        if (value) {
+                          await _dpi.initialize(enabled: true);
+                        } else {
+                          await _dpi.disableAndroid();
+                        }
+                        await _reload();
+                      } else {
+                        _message('Windows DPI 변경사항은 앱 재시작 후 적용됩니다.');
+                      }
+                      if (mounted) {
+                        setState(() {});
+                        update(() {});
+                      }
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.info_outline),
+                    title: const Text('DPI 연결 상태'),
+                    subtitle: Text(_dpi.status),
                   ),
                   const ListTile(
                     leading: Icon(Icons.info_outline),
@@ -563,8 +717,54 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
   }
 
+
+  Future<void> _showTabChooser() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              title: const Text('열린 탭'),
+              trailing: IconButton(
+                tooltip: '새 탭',
+                icon: const Icon(Icons.add),
+                onPressed: () {
+                  Navigator.pop(sheet);
+                  _addTab();
+                },
+              ),
+            ),
+            for (var i = 0; i < _tabs.length; i++)
+              ListTile(
+                selected: i == _selected,
+                leading: const Icon(Icons.tab),
+                title: Text(_tabs[i].title, maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                subtitle: Text(_tabs[i].uri.toString(), maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                trailing: IconButton(
+                  tooltip: '탭 닫기',
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    Navigator.pop(sheet);
+                    _closeTab(i);
+                  },
+                ),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _selectTab(i);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _tabStrip() => SizedBox(
-        height: 42,
+        height: 34,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           itemCount: _tabs.length + 1,
@@ -630,10 +830,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
             Expanded(
               child: TextField(
                 controller: _address,
+                 focusNode: _addressFocus,
                 keyboardType: TextInputType.url,
                 textInputAction: TextInputAction.go,
                 autocorrect: false,
-                onSubmitted: _go,
+                onSubmitted: _submitAddress,
                 decoration: InputDecoration(
                   isDense: true,
                   prefixIcon: const Icon(Icons.language, size: 18),
@@ -645,9 +846,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
               ),
             ),
             IconButton(
-              tooltip: '동영상 감지',
-              onPressed: _showVideos,
-              icon: const Icon(Icons.video_library_outlined),
+              tooltip: '탭 목록',
+              onPressed: _showTabChooser,
+              icon: Badge(
+                label: Text('${_tabs.length}'),
+                child: const Icon(Icons.tab),
+              ),
             ),
             PopupMenuButton<String>(
               tooltip: '메뉴',
@@ -655,6 +859,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 switch (value) {
                   case 'new':
                     _addTab();
+                  case 'videos':
+                    _showVideos();
                   case 'refresh':
                     _reload();
                   case 'bookmark':
@@ -667,10 +873,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     _showDownloads();
                   case 'settings':
                     _showSettings();
+                  case 'toggle_tabs':
+                    setState(() => _showTabStrip = !_showTabStrip);
                 }
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'new', child: Text('새 탭')),
+                const PopupMenuItem(value: 'videos', child: Text('동영상 감지·다운로드')),
                 const PopupMenuItem(value: 'refresh', child: Text('새로고침')),
                 PopupMenuItem(
                     value: 'bookmark',
@@ -682,6 +891,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     value: 'downloads', child: Text('동영상 서재')),
                 const PopupMenuItem(
                     value: 'settings', child: Text('광고·DPI 설정')),
+                if (wide) PopupMenuItem(
+                    value: 'toggle_tabs', child: Text(_showTabStrip ? '탭줄 숨기기' : '탭줄 표시')),
               ],
             ),
           ],
@@ -718,6 +929,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
         onLoadStop: (controller, url) async {
           _updateLocation(tab, url);
           await _pageFinished(tab);
+        },
+        onScrollChanged: (controller, x, y) {
+          if (identical(tab, _tab)) _onWebScroll(y);
         },
         onProgressChanged: (controller, progress) {
           if (mounted && _tabs.contains(tab) && tab.progress != progress) {
@@ -781,35 +995,38 @@ class _BrowserScreenState extends State<BrowserScreen> {
         if (!didPop) _back();
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Internet Browser'),
-          actions: [
-            IconButton(
-              tooltip: '동영상 서재',
-              onPressed: _showDownloads,
-              icon: const Icon(Icons.download_outlined),
-            ),
-            if (!wide)
-              TextButton(
-                onPressed: _addTab,
-                child: Text('${_tabs.length} +'),
-              ),
-          ],
-        ),
         body: _error != null
             ? Center(child: SelectableText('브라우저 초기화 실패:\n$_error'))
             : !_ready
                 ? const Center(child: CircularProgressIndicator())
                 : Column(
                     children: [
-                      if (wide || _tabs.length > 1) _tabStrip(),
-                      _toolbar(wide),
+                      if (_chromeVisible) ...[
+                        if (wide && _showTabStrip) _tabStrip(),
+                        _toolbar(wide),
+                      ],
                       if (_tab.progress < 100)
                         LinearProgressIndicator(value: _tab.progress / 100),
                       Expanded(
-                        child: IndexedStack(
-                          index: _selected,
-                          children: _tabs.map(_webView).toList(),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: IndexedStack(
+                                index: _selected,
+                                children: _tabs.map(_webView).toList(),
+                              ),
+                            ),
+                            if (!_chromeVisible)
+                              Positioned(
+                                right: 8,
+                                top: 8,
+                                child: FloatingActionButton.small(
+                                  tooltip: '주소창 펼치기',
+                                  onPressed: _revealChrome,
+                                  child: const Icon(Icons.keyboard_arrow_down),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ],

@@ -26,6 +26,8 @@ jobs:
       - name: Validate Android manifest XML
         run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - run: dart format --output=write lib test
       - run: flutter analyze
       - run: flutter test
@@ -47,10 +49,12 @@ jobs:
       - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android .
       - run: python3 tool/prepare_platforms.py
       - run: flutter pub get
+      - name: Generate parcel launcher icon for Android and Windows
+        run: dart run flutter_launcher_icons
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Android-v0.1.0
+          name: Browser-Android-v0.1.1
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
@@ -65,9 +69,14 @@ jobs:
           channel: stable
       - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
       - run: flutter pub get
+      - name: Generate Windows parcel icon only
+        run: dart run flutter_launcher_icons -f flutter_launcher_icons_windows.yaml
       - name: Verify Windows build toolchain
         run: flutter doctor -v
       - run: flutter build windows --release
+      - name: Include verified ByeDPI Windows proxy engine
+        shell: pwsh
+        run: ./tool/install_byedpi.ps1
       - name: Locate or install Inno Setup 6
         shell: pwsh
         run: |
@@ -89,11 +98,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-v0.1.0
+          name: Browser-Windows-v0.1.1
           path: build/windows/x64/runner/Release/**
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-Setup-v0.1.0
+          name: Browser-Windows-Setup-v0.1.1
           path: dist/Internet-browser-Windows-Setup-v*.exe
           if-no-files-found: error

@@ -29,6 +29,12 @@ class AdBlocker {
     'quantserve.com',
   };
 
+  /// Apply player-specific cleanup only to the actual YouTube origins.
+  static bool isYoutube(Uri page) => <String>{
+    'youtube.com', 'www.youtube.com', 'm.youtube.com',
+    'music.youtube.com',
+  }.contains(page.host.toLowerCase());
+
   static bool hostMatches(String host, String domain) {
     final h = host.toLowerCase();
     final d = domain.toLowerCase();
@@ -60,6 +66,31 @@ class AdBlocker {
   }
 
   /// Conservative element hiding; no remote JS, no arbitrary filter execution.
+  /// Best-effort skip of visible buttons; embedded/unskippable ads may still
+  /// play. Never claim complete YouTube ad blocking.
+  static const youtubeCleanupScript = r'''
+(function () {
+  if (window.__internetBrowserYoutubeHelper) return;
+  window.__internetBrowserYoutubeHelper = true;
+  function closeSkippableAds() {
+    const selectors = [
+      '.ytp-ad-skip-button',
+      '.ytp-ad-skip-button-modern',
+      '.ytp-skip-ad-button',
+      '.ytp-ad-overlay-close-button'
+    ];
+    for (const selector of selectors) {
+      document.querySelectorAll(selector).forEach(element => {
+        if (element.getClientRects().length > 0) element.click();
+      });
+    }
+  }
+  closeSkippableAds();
+  const observer = new MutationObserver(closeSkippableAds);
+  observer.observe(document.documentElement, {childList: true, subtree: true});
+})();
+''';
+
   static const cosmeticScript = r'''
 (function () {
   if (document.getElementById('internet-browser-ad-style')) return;

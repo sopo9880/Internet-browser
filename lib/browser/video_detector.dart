@@ -4,6 +4,29 @@ import 'address_parser.dart';
 /// HLS, DASH, blob URLs and authenticated streams require separate handling.
 class VideoDetector {
   static const extensions = <String>{'.mp4', '.webm', '.mov', '.m4v'};
+ 
+  /// Match a YouTube video id only on actual YouTube hosts.
+  static String? youtubeVideoId(Uri uri) {
+    if (uri.scheme != 'https' && uri.scheme != 'http') return null;
+    final host = uri.host.toLowerCase();
+    String? id;
+    if (host == 'youtu.be' || host == 'www.youtu.be') {
+      id = uri.pathSegments.isEmpty ? null : uri.pathSegments.first;
+    } else if (host == 'youtube.com' ||
+        host == 'www.youtube.com' ||
+        host == 'm.youtube.com' ||
+        host == 'music.youtube.com') {
+      if (uri.path == '/watch') {
+        id = uri.queryParameters['v'];
+      } else if (uri.pathSegments.length == 2 &&
+          const ['shorts', 'embed', 'live'].contains(uri.pathSegments.first)) {
+        id = uri.pathSegments.last;
+      }
+    }
+    if (id == null) return null;
+    return RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(id) ? id : null;
+  }
+
 
   static bool isDirectVideo(Uri uri) {
     if (!AddressParser.isRemoteHttp(uri)) return false;

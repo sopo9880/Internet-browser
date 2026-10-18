@@ -207,11 +207,21 @@ class _InstallerDownloadDialogState extends State<InstallerDownloadDialog> {
               SelectableText(
                 '업데이트를 준비하지 못했습니다.\n$_error',
               )
-            else if (hasResult)
+            else if (hasResult) ...[
               const Text(
                 'SHA-256 무결성 검증이 완료됐습니다. '
-                '설치 버튼을 누르면 운영체제 설치 화면이 열립니다.',
-              )
+                '설치는 사용자가 직접 승인합니다.',
+              ),
+              if (widget.update.platform == UpdatePlatform.android) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  '설치가 차단되면 아래에서 앱별 설치 허용 화면을 '
+                  '여세요. 삼성 자동 차단은 '
+                  '설정 > 보안 및 개인정보 보호 > 보안 위험 자동 차단에서 '
+                  '직접 확인하세요. 보안 설정은 자동으로 해제되지 않습니다.',
+                ),
+              ],
+            ]
             else ...[
               const Text('공식 GitHub Releases에서 설치 파일 다운로드 중'),
               const SizedBox(height: 12),
@@ -235,6 +245,18 @@ class _InstallerDownloadDialogState extends State<InstallerDownloadDialog> {
           TextButton(
             onPressed: () => openOfficialReleasePage(context, widget.update),
             child: const Text('릴리스 페이지'),
+          ),
+        if (widget.update.platform == UpdatePlatform.android &&
+            hasResult)
+          TextButton(
+            onPressed: () async {
+              try {
+                await widget.service.openAndroidInstallSettings();
+              } catch (error) {
+                if (mounted) setState(() => _error = error.toString());
+              }
+            },
+            child: const Text('설치 허용 설정 열기'),
           ),
         if (hasResult && _completionMessage == null)
           FilledButton(
