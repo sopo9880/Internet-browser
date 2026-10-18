@@ -6,6 +6,7 @@ Validate XML after insertion and make repeated runs safe.
 """
 
 from pathlib import Path
+import os
 import re
 import xml.etree.ElementTree as ET
 
@@ -31,3 +32,26 @@ if root.tag != "manifest":
 
 manifest.write_text(source, encoding="utf-8")
 print("Android manifest permission and XML validated.")
+
+
+# GitHub-hosted Ubuntu 24.04 runners have NDK 27.3 preinstalled.
+# Flutter 3.35 defaults to NDK 27.0 and attempts to download it if missing.
+# CI explicitly selects the installed version to avoid a corrupt NDK download.
+ndk_version = os.environ.get("BROWSER_ANDROID_NDK_VERSION")
+if ndk_version:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", ndk_version):
+        raise SystemExit(f"Invalid BROWSER_ANDROID_NDK_VERSION: {ndk_version}")
+    sdk_dir = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
+    if not sdk_dir:
+        raise SystemExit("ANDROID_SDK_ROOT or ANDROID_HOME is required for CI NDK")
+    installed = Path(sdk_dir, "ndk", ndk_version, "source.properties")
+    if not installed.is_file():
+        raise SystemExit(f"NDK {ndk_version} not present: {installed}")
+    build_gradle = Path("android/app/build.gradle.kts")
+    gradle = build_gradle.read_text(encoding="utf-8")
+    target = "ndkVersion = flutter.ndkVersion"
+    if target not in gradle:
+        raise SystemExit("Flutter template changed: missing ndkVersion entry")
+    gradle = gradle.replace(target, f'ndkVersion = "{ndk_version}"', 1)
+    build_gradle.write_text(gradle, encoding="utf-8")
+    print(f"Using runner-preinstalled Android NDK {ndk_version}")
