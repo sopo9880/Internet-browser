@@ -1,0 +1,99 @@
+name: Browser v0.x CI
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          channel: stable
+      - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android,windows .
+      - name: Restore project widget test after Flutter bootstrap
+        run: git show HEAD:test/widget_test.dart > test/widget_test.dart
+      - run: python3 tool/prepare_platforms.py
+      - name: Test release metadata and signing template (without secrets)
+        run: |
+          python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
+          python3 tool/release_metadata.py
+          python3 tool/configure_android_signing.py
+      - name: Validate Android manifest XML
+        run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
+      - run: flutter pub get
+      - run: dart format --output=write lib test
+      - run: flutter analyze
+      - run: flutter test
+  android:
+    runs-on: ubuntu-24.04
+    needs: quality
+    env:
+      BROWSER_ANDROID_NDK_VERSION: '27.3.13750724'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          channel: stable
+      - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android .
+      - run: python3 tool/prepare_platforms.py
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Browser-Android-v0.1.0
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+  windows:
+    # Flutter 3.35.x cannot identify Visual Studio 2026 on windows-latest.
+    runs-on: windows-2022
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          channel: stable
+      - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
+      - run: flutter pub get
+      - name: Verify Windows build toolchain
+        run: flutter doctor -v
+      - run: flutter build windows --release
+      - name: Locate or install Inno Setup 6
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler was not found"
+          }
+      - name: Build Windows update installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          $matches = Select-String -Path pubspec.yaml -Pattern '^version:\s*(\d+\.\d+\.\d+)'
+          if (-not $matches) { throw "Missing semantic app version" }
+          $version = $matches.Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$version" "installer\InternetBrowser.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Browser-Windows-v0.1.0
+          path: build/windows/x64/runner/Release/**
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Browser-Windows-Setup-v0.1.0
+          path: dist/Internet-browser-Windows-Setup-v*.exe
+          if-no-files-found: error

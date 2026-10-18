@@ -1,0 +1,27 @@
+name: internet_browser
+description: Private browser foundation for Windows and Android.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_inappwebview: 6.1.5
+  shared_preferences: ^2.5.3
+  dio: ^5.8.0+1
+  path_provider: ^2.1.5
+  open_filex: ^4.7.0
+  package_info_plus: 8.3.1
+  crypto: ^3.0.7
+  url_launcher: 6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
