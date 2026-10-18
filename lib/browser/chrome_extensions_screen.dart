@@ -150,3 +150,4 @@ class _ChromeExtensionsScreenState extends State<ChromeExtensionsScreen> {
           },
         ),
       );
+}
