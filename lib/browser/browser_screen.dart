@@ -780,7 +780,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<DpiPreset>(
-                      value: editing.preset,
+                      initialValue: editing.preset,
                       decoration: const InputDecoration(
                         labelText: '우회 프리셋',
                       ),
@@ -864,7 +864,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                       ),
                       if (editing.fakePacket)
                         DropdownButtonFormField<int>(
-                          value: editing.fakeTtl,
+                          initialValue: editing.fakeTtl,
                           decoration: const InputDecoration(
                             labelText: 'Fake TTL 값',
                           ),
@@ -873,8 +873,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                               DropdownMenuItem(value: ttl, child: Text('$ttl')),
                           ],
                           onChanged: (value) {
-                            if (value != null) update(() =>
-                                editing = editing.copyWith(fakeTtl: value));
+                            if (value != null) {
+                              update(() =>
+                                  editing = editing.copyWith(fakeTtl: value));
+                            }
                           },
                         ),
                     ],

@@ -127,7 +127,9 @@ class AndroidChromiumExtensionHost implements ChromeExtensionHost {
   @override
   Future<bool> isInstalledAndEnabled(String id) async {
     if (!RequiredChromeExtension.validId(id) ||
-        !(await capabilities()).canLoadAdBlock) return false;
+        !(await capabilities()).canLoadAdBlock) {
+      return false;
+    }
     try {
       return await _channel.invokeMethod<bool>(
             'isInstalledAndEnabled', {'id': id},
