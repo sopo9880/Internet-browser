@@ -187,8 +187,8 @@ jobs:
       - name: Generate Windows project
         run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
       - run: flutter pub get
-      - name: Generate parcel launcher icon for Android and Windows
-        run: dart run flutter_launcher_icons
+      - name: Generate Windows parcel icon only
+        run: dart run flutter_launcher_icons -f flutter_launcher_icons_windows.yaml
       - run: flutter build windows --release
       - name: Include verified ByeDPI Windows proxy engine
         shell: pwsh
