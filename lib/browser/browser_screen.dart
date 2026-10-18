@@ -11,6 +11,10 @@ import 'ad_blocker.dart';
 import 'address_parser.dart';
 import 'download_manager.dart';
 import 'dpi_proxy.dart';
+import 'dpi_options.dart';
+import 'offline_video_player.dart';
+import 'video_library.dart';
+import 'video_metadata.dart';
 import 'update_dialogs.dart';
 import 'update_service.dart';
 import 'video_detector.dart';
@@ -38,6 +42,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   final _address = TextEditingController();
   final _addressFocus = FocusNode();
   final _dpi = BrowserDpiProxy();
+  DpiOptions _dpiOptions = const DpiOptions();
+  final _library = VideoLibrary();
   bool _chromeVisible = true;
   bool _showTabStrip = false;
   int _previousScrollY = 0;
@@ -70,12 +76,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       _prefs = prefs;
+      _dpiOptions = DpiOptions.fromPrefs(prefs);
       _ads.enabled = prefs.getBool('ads_enabled') ?? true;
       _ads.allowedHosts.addAll(prefs.getStringList('ads_exceptions') ?? []);
       _bookmarks.addAll(prefs.getStringList('bookmarks') ?? []);
       _history.addAll(prefs.getStringList('history') ?? []);
       final proxyConnected = await _dpi.initialize(
         enabled: prefs.getBool('dpi_enabled') ?? false,
+        options: _dpiOptions,
       );
       if (defaultTargetPlatform == TargetPlatform.windows) {
         final version = await WebViewEnvironment.getAvailableVersion();
@@ -92,6 +100,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         );
       }
       await _downloads.loadSaved();
+      await _library.loadSaved(_downloads.items);
       if (mounted) {
         setState(() => _ready = true);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -109,6 +118,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _addressFocus.dispose();
     _dpi.dispose();
     _downloads.dispose();
+    _library.dispose();
     _updates.dispose();
     _environment?.dispose();
     super.dispose();
@@ -178,13 +188,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
   }
 
+  void _dismissAddressEditor() {
+    if (_addressFocus.hasFocus) _addressFocus.unfocus();
+  }
+
   Future<void> _submitAddress(String input) async {
-    _addressFocus.unfocus();
+    _dismissAddressEditor();
     await _go(input);
   }
 
   void _onWebScroll(int y) {
-    if (!mounted || _addressFocus.hasFocus) return;
+    if (!mounted) return;
+    _dismissAddressEditor();
     final delta = y - _previousScrollY;
     _previousScrollY = y;
     if (y < 18 && !_chromeVisible) {
@@ -353,6 +368,31 @@ class _BrowserScreenState extends State<BrowserScreen> {
       } catch (_) {}
     }
     await _detectMedia(tab);
+    try {
+      await tab.controller?.evaluateJavascript(source: r'''
+(function() {
+ if (window.__internetBrowserFocusInstalled) return;
+ window.__internetBrowserFocusInstalled = true;
+ document.addEventListener('pointerdown', function() {
+   if (window.flutter_inappwebview) {
+     window.flutter_inappwebview.callHandler('browserPointerDown');
+   }
+ }, {passive: true, capture: true});
+})();
+''');
+    } catch (_) {}
+  }
+
+  Future<VideoPageMetadata> _readPageMetadata(BrowserTab tab) async {
+    dynamic value;
+    try {
+      value = await tab.controller?.evaluateJavascript(
+        source: VideoPageMetadata.discoverScript,
+      );
+    } catch (_) {}
+    return VideoPageMetadata.parse(
+      value, tab.uri, fallbackTitle: tab.title,
+    );
   }
 
   Future<void> _download(Uri uri) async {
@@ -362,8 +402,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
     _message('영상 다운로드를 시작했습니다.');
     try {
-      final item = await _downloads.download(uri);
+      final metadata = await _readPageMetadata(_tab);
+      final item = await _downloads.download(uri, metadata: metadata);
       if (item.state == VideoDownloadState.complete) {
+        await _library.register(item, page: metadata);
         _message('다운로드 완료: ${item.fileName}');
       } else if (item.state == VideoDownloadState.failed) {
         _message('다운로드 실패: ${item.error ?? '오류'}');
@@ -416,7 +458,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (permitted != true || !mounted) return;
     _message('YouTube 영상 스트림 확인 및 다운로드를 시작했습니다.');
     try {
+      final metadata = await _readPageMetadata(_tab);
       final item = await _downloads.downloadYoutube(page);
+      if (item.state == VideoDownloadState.complete) {
+        await _library.register(
+          item,
+          page: metadata,
+          title: item.resolvedTitle,
+          thumbnail: item.thumbnailUrl,
+          quality: item.qualityLabel,
+          durationSeconds: item.durationSeconds,
+        );
+      }
       if (!mounted) return;
       if (item.state == VideoDownloadState.complete) {
         _message('영상 다운로드 완료: ${item.fileName}');
@@ -431,6 +484,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Future<void> _showVideos() async {
     final tab = _tab;
     await _detectMedia(tab);
+    if (!mounted) return;
+    final metadata = await _readPageMetadata(tab);
     if (!mounted) return;
     final urls = tab.videos.toList();
     final youtubeId = VideoDetector.youtubeVideoId(tab.uri);
@@ -457,7 +512,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     if (youtubeId != null && i == 0) {
                       return ListTile(
                         leading: const Icon(Icons.smart_display_outlined),
-                        title: const Text('현재 YouTube 영상 저장'),
+                        title: Text('현재 영상: ${metadata.title}'),
                         subtitle: const Text('가능한 음성+영상 통합 스트림'),
                         trailing: const Icon(Icons.download_outlined),
                         onTap: () {
@@ -470,9 +525,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     return ListTile(
                       leading: const Icon(Icons.movie_outlined),
                       title: Text(
-                        urls[index].pathSegments.isEmpty
-                            ? '동영상'
-                            : urls[index].pathSegments.last,
+                        metadata.title == '동영상'
+                            ? (urls[index].pathSegments.isEmpty
+                                ? '동영상'
+                                : urls[index].pathSegments.last)
+                            : metadata.title,
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(urls[index].host),
@@ -492,22 +549,80 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
   }
 
+  Future<void> _openOfflineVideo(VideoDownloadItem selected) async {
+    final completed = _downloads.items.where(
+      (item) => item.state == VideoDownloadState.complete,
+    ).toList();
+    final index = completed.indexOf(selected);
+    if (index < 0 || !mounted) return;
+    final saved = completed.map(_library.forItem).toList();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => OfflineVideoPlayer(
+          items: saved,
+          initialIndex: index,
+          onPositionChanged: _library.setPlaybackPosition,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _renameOfflineVideo(VideoDownloadItem item) async {
+    final saved = _library.forItem(item);
+    final controller = TextEditingController(text: saved.title);
+    try {
+      final title = await showDialog<String>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('영상 제목 수정'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 180,
+            decoration: const InputDecoration(
+              hintText: '영상 제목',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, controller.text),
+              child: const Text('저장'),
+            ),
+          ],
+        ),
+      );
+      if (title != null) await _library.editTitle(saved, title);
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _deleteOfflineVideo(VideoDownloadItem item) async {
+    final wasActive = item.state == VideoDownloadState.running;
+    await _downloads.delete(item);
+    if (!wasActive) await _library.forget(item);
+  }
+
   Future<void> _showDownloads() async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => SafeArea(
+      builder: (sheet) => SafeArea(
         child: FractionallySizedBox(
-          heightFactor: 0.72,
+          heightFactor: 0.78,
           child: AnimatedBuilder(
-            animation: _downloads,
+            animation: Listenable.merge([_downloads, _library]),
             builder: (_, child) {
               final items = _downloads.items;
               return Column(
                 children: [
                   const ListTile(
-                    title: Text('오프라인 동영상'),
-                    subtitle: Text('완료한 영상을 탭하면 기기 플레이어로 열립니다.'),
+                    title: Text('오프라인 동영상 서재'),
+                    subtitle: Text('앱 내 플레이어 · 제목 편집 · 이어보기'),
                   ),
                   Expanded(
                     child: items.isEmpty
@@ -516,13 +631,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
                             itemCount: items.length,
                             itemBuilder: (_, i) {
                               final item = items[i];
+                              final saved = _library.forItem(item);
                               final completed =
                                   item.state == VideoDownloadState.complete;
                               final running =
                                   item.state == VideoDownloadState.running;
+                              final details = <String>[
+                                if (saved.quality != null) saved.quality!,
+                                if (saved.durationSeconds != null)
+                                  '${Duration(seconds: saved.durationSeconds!)}',
+                                if (saved.lastPositionMs > 0)
+                                  '이어보기 ${Duration(milliseconds: saved.lastPositionMs)}',
+                              ];
                               return ListTile(
                                 title: Text(
-                                  item.fileName,
+                                  completed ? saved.title
+                                      : (item.resolvedTitle ?? item.fileName),
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 subtitle: running
@@ -530,7 +655,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
                                         value: item.progress / 100,
                                       )
                                     : Text(
-                                        item.error == null ? item.state.name : '${item.state.name}: ${item.error}',
+                                        item.error == null
+                                            ? (completed
+                                                ? (details.isEmpty
+                                                    ? '오프라인 저장 완료'
+                                                    : details.join(' · '))
+                                                : item.state.name)
+                                            : '${item.state.name}: ${item.error}',
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -540,16 +671,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
                                       : Icons.download_outlined,
                                 ),
                                 onTap: completed
-                                    ? () => _downloads.open(item)
+                                    ? () {
+                                        Navigator.pop(sheet);
+                                        _openOfflineVideo(item);
+                                      }
                                     : null,
-                                trailing: IconButton(
-                                  tooltip: running ? '취소' : '삭제',
-                                  onPressed: () => _downloads.delete(item),
-                                  icon: Icon(
-                                    running
-                                        ? Icons.cancel_outlined
-                                        : Icons.delete_outline,
-                                  ),
+                                trailing: PopupMenuButton<String>(
+                                  tooltip: '동영상 메뉴',
+                                  onSelected: (selected) async {
+                                    if (selected == 'rename' && completed) {
+                                      await _renameOfflineVideo(item);
+                                    }
+                                    if (selected == 'delete') {
+                                      await _deleteOfflineVideo(item);
+                                    }
+                                  },
+                                  itemBuilder: (_) => [
+                                    if (completed)
+                                      const PopupMenuItem(
+                                        value: 'rename',
+                                        child: Text('제목 수정'),
+                                      ),
+                                    PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text(running ? '다운로드 취소' : '삭제'),
+                                    ),
+                                  ],
                                 ),
                               );
                             },
@@ -612,6 +759,188 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
   }
 
+  Future<void> _showDpiOptions() async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    DpiOptions editing = _dpiOptions;
+    final split = TextEditingController(text: editing.splitValue);
+    final disorder = TextEditingController(text: editing.disorderValue);
+    final tls = TextEditingController(text: editing.tlsValue);
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialog) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: const Text('ByeDPI 우회 인자 설정'),
+            content: SizedBox(
+              width: 430,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<DpiPreset>(
+                      value: editing.preset,
+                      decoration: const InputDecoration(
+                        labelText: '우회 프리셋',
+                      ),
+                      items: [
+                        for (final preset in DpiPreset.values)
+                          DropdownMenuItem(
+                            value: preset,
+                            child: Text(DpiOptions.presetNames[preset]!),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          update(() =>
+                              editing = editing.copyWith(preset: value));
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '프리셋은 Windows·Android 플랫폼별 적절한 인자를 '
+                      '선택합니다. 사용자 지정 시 각 옵션을 개별 설정합니다.',
+                    ),
+                    if (editing.preset == DpiPreset.custom) ...[
+                      SwitchListTile(
+                        title: const Text('Split · 요청 분할'),
+                        value: editing.split,
+                        onChanged: (value) => update(() =>
+                            editing = editing.copyWith(split: value)),
+                      ),
+                      TextField(
+                        controller: split,
+                        enabled: editing.split,
+                        decoration: const InputDecoration(
+                          labelText: 'Split 위치 (예: 1+s)',
+                        ),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Disorder · 역순 전송'),
+                        value: editing.disorder,
+                        onChanged: (value) => update(() =>
+                            editing = editing.copyWith(disorder: value)),
+                      ),
+                      TextField(
+                        controller: disorder,
+                        enabled: editing.disorder,
+                        decoration: const InputDecoration(
+                          labelText: 'Disorder 위치 (예: 3+s)',
+                        ),
+                      ),
+                      SwitchListTile(
+                        title: const Text('TLS Record 분할'),
+                        value: editing.tlsRecord,
+                        onChanged: (value) => update(() =>
+                            editing = editing.copyWith(tlsRecord: value)),
+                      ),
+                      TextField(
+                        controller: tls,
+                        enabled: editing.tlsRecord,
+                        decoration: const InputDecoration(
+                          labelText: 'TLS Record 위치 (예: 1+s)',
+                        ),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Auto · 실패 시 재시도'),
+                        value: editing.autoRetry,
+                        onChanged: (value) => update(() =>
+                            editing = editing.copyWith(autoRetry: value)),
+                      ),
+                      SwitchListTile(
+                        title: const Text('HTTP Host 변형'),
+                        value: editing.httpModification,
+                        onChanged: (value) => update(() =>
+                            editing = editing.copyWith(
+                              httpModification: value)),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Fake · TTL 제한 가짜 패킷'),
+                        value: editing.fakePacket,
+                        onChanged: (value) => update(() =>
+                            editing = editing.copyWith(fakePacket: value)),
+                      ),
+                      if (editing.fakePacket)
+                        DropdownButtonFormField<int>(
+                          value: editing.fakeTtl,
+                          decoration: const InputDecoration(
+                            labelText: 'Fake TTL 값',
+                          ),
+                          items: [
+                            for (final ttl in const [4, 8, 12, 16, 32])
+                              DropdownMenuItem(value: ttl, child: Text('$ttl')),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) update(() =>
+                                editing = editing.copyWith(fakeTtl: value));
+                          },
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  split.text = '1+s';
+                  disorder.text = '3+s';
+                  tls.text = '1+s';
+                  update(() => editing = const DpiOptions());
+                },
+                child: const Text('기본값 복원'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final candidate = editing.copyWith(
+                    splitValue: split.text.trim(),
+                    disorderValue: disorder.text.trim(),
+                    tlsValue: tls.text.trim(),
+                  );
+                  if (candidate.preset == DpiPreset.custom &&
+                      ((candidate.split &&
+                            !DpiOptions.validPosition(candidate.splitValue)) ||
+                       (candidate.disorder &&
+                            !DpiOptions.validPosition(candidate.disorderValue)) ||
+                       (candidate.tlsRecord &&
+                            !DpiOptions.validPosition(candidate.tlsValue)))) {
+                    _message('인자 형식이 잘못됐습니다. 1+s 같은 위치만 입력하세요.');
+                    return;
+                  }
+                  await candidate.save(prefs);
+                  _dpiOptions = candidate;
+                  if (defaultTargetPlatform == TargetPlatform.android &&
+                      (prefs.getBool('dpi_enabled') ?? false)) {
+                    await _dpi.disableAndroid();
+                    await _dpi.initialize(enabled: true, options: candidate);
+                    await _reload();
+                  }
+                  if (mounted) {
+                    setState(() {});
+                    if (dialog.mounted) Navigator.pop(dialog);
+                    _message(defaultTargetPlatform == TargetPlatform.windows
+                        ? '설정 저장 완료. Windows 재시작 후 적용됩니다.'
+                        : _dpi.status);
+                  }
+                },
+                child: const Text('저장 및 적용'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      split.dispose();
+      disorder.dispose();
+      tls.dispose();
+    }
+  }
+
   Future<void> _showSettings() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -672,17 +1001,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   const Divider(),
                   SwitchListTile(
                     secondary: const Icon(Icons.shield_outlined),
-                    title: const Text('DPI 우회 · 로컬 SOCKS5'),
+                    title: const Text('ByeDPI 우회 엔진'),
                     subtitle: Text(_dpi.status +
                         (defaultTargetPlatform == TargetPlatform.windows
                             ? '\nWindows: 변경 후 앱 재시작 필요'
-                            : '\nAndroid: ByeDPI SOCKS5 서버 별도 실행 필요')),
+                            : '\nAndroid: 앱에 포함된 ByeDPI 엔진 사용')),
                     value: _prefs?.getBool('dpi_enabled') ?? false,
                     onChanged: (value) async {
                       await _prefs?.setBool('dpi_enabled', value);
                       if (defaultTargetPlatform == TargetPlatform.android) {
                         if (value) {
-                          await _dpi.initialize(enabled: true);
+                          await _dpi.initialize(
+                            enabled: true, options: _dpiOptions,
+                          );
                         } else {
                           await _dpi.disableAndroid();
                         }
@@ -694,6 +1025,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
                         setState(() {});
                         update(() {});
                       }
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.tune),
+                    title: const Text('DPI 우회 인자 및 프리셋'),
+                    subtitle: Text(
+                      DpiOptions.presetNames[_dpiOptions.preset] ??
+                          '기본 (권장)',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () async {
+                      await _showDpiOptions();
+                      if (mounted) update(() {});
                     },
                   ),
                   ListTile(
@@ -835,6 +1179,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 textInputAction: TextInputAction.go,
                 autocorrect: false,
                 onSubmitted: _submitAddress,
+                 onTapOutside: (_) => _dismissAddressEditor(),
                 decoration: InputDecoration(
                   isDense: true,
                   prefixIcon: const Icon(Icons.language, size: 18),
@@ -917,6 +1262,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
         ),
         onWebViewCreated: (controller) {
           tab.controller = controller;
+          controller.addJavaScriptHandler(
+            handlerName: 'browserPointerDown',
+            callback: (_) {
+              _dismissAddressEditor();
+              return null;
+            },
+          );
         },
         onLoadStart: (controller, url) {
           if (!mounted || !_tabs.contains(tab)) return;
@@ -995,43 +1347,53 @@ class _BrowserScreenState extends State<BrowserScreen> {
         if (!didPop) _back();
       },
       child: Scaffold(
-        body: _error != null
-            ? Center(child: SelectableText('브라우저 초기화 실패:\n$_error'))
-            : !_ready
-                ? const Center(child: CircularProgressIndicator())
-                : Column(
-                    children: [
-                      if (_chromeVisible) ...[
-                        if (wide && _showTabStrip) _tabStrip(),
-                        _toolbar(wide),
-                      ],
-                      if (_tab.progress < 100)
-                        LinearProgressIndicator(value: _tab.progress / 100),
-                      Expanded(
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: IndexedStack(
-                                index: _selected,
-                                children: _tabs.map(_webView).toList(),
-                              ),
-                            ),
-                            if (!_chromeVisible)
-                              Positioned(
-                                right: 8,
-                                top: 8,
-                                child: FloatingActionButton.small(
-                                  tooltip: '주소창 펼치기',
-                                  onPressed: _revealChrome,
-                                  child: const Icon(Icons.keyboard_arrow_down),
+        body: SafeArea(
+          child: _error != null
+              ? Center(child: SelectableText('브라우저 초기화 실패:\n$_error'))
+              : !_ready
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      children: [
+                        if (_chromeVisible) ...[
+                          if (wide && _showTabStrip) _tabStrip(),
+                          _toolbar(wide),
+                        ],
+                        if (_tab.progress < 100)
+                          LinearProgressIndicator(
+                            value: _tab.progress / 100,
+                          ),
+                        Expanded(
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: Listener(
+                                  onPointerDown: (_) => _dismissAddressEditor(),
+                                  child: IndexedStack(
+                                    index: _selected,
+                                    children: _tabs.map(_webView).toList(),
+                                  ),
                                 ),
                               ),
-                          ],
+                              if (!_chromeVisible)
+                                Positioned(
+                                  right: 8,
+                                  top: 8,
+                                  child: FloatingActionButton.small(
+                                    tooltip: '주소창 펼치기',
+                                    onPressed: _revealChrome,
+                                    child: const Icon(
+                                      Icons.keyboard_arrow_down,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+        ),
       ),
     );
   }
+
 }

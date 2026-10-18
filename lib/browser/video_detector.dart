@@ -3,7 +3,9 @@ import 'address_parser.dart';
 /// v0.1.0 intentionally supports direct, non-DRM file URLs only.
 /// HLS, DASH, blob URLs and authenticated streams require separate handling.
 class VideoDetector {
-  static const extensions = <String>{'.mp4', '.webm', '.mov', '.m4v'};
+  static const extensions = <String>{
+    '.mp4', '.webm', '.mov', '.m4v', '.mkv', '.avi', '.3gp', '.m2ts', '.ts', '.flv'
+  };
  
   /// Match a YouTube video id only on actual YouTube hosts.
   static String? youtubeVideoId(Uri uri) {

@@ -1,6 +1,6 @@
 # Internet-browser
 
-Windows + Android Flutter browser — v0.1.1 in development.
+Windows + Android Flutter browser — v0.1.2 in development.
 
 Latest released version: [v0.1.0](https://github.com/sopo9880/Internet-browser/releases/tag/v0.1.0).
 

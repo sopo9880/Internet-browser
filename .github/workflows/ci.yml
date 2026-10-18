@@ -51,10 +51,12 @@ jobs:
       - run: flutter pub get
       - name: Generate parcel launcher icon for Android and Windows
         run: dart run flutter_launcher_icons
+      - name: Build pinned Android-native ByeDPI SOCKS5 engines
+        run: python3 tool/build_android_byedpi.py
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Android-v0.1.1
+          name: Browser-Android-v0.1.2
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
@@ -98,11 +100,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-v0.1.1
+          name: Browser-Windows-v0.1.2
           path: build/windows/x64/runner/Release/**
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-Setup-v0.1.1
+          name: Browser-Windows-Setup-v0.1.2
           path: dist/Internet-browser-Windows-Setup-v*.exe
           if-no-files-found: error

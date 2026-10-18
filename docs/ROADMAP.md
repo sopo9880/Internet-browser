@@ -14,3 +14,11 @@ The browser saves allowed YouTube muxed audio+video streams with a user confirma
 
 ## Release gates
 Build both EXE bundle and APK against the same SHA, verify on real devices, and require explicit confirmation before PR merge or release.
+
+
+## v0.1.2: in-app video library and native DPI
+
+- User-configurable Windows and Android DPI argument presets with allowlisted flags.
+- Android NDK-builds bundled ByeDPI engine for app-scoped SOCKS5; real-device verification and WebView compatibility remain required.
+- Preserve all existing downloads while adding video page metadata, original title, thumbnails, playback position and local player.
+- MediaKit offline player on Windows/Android: shortcuts, ±10s, hold 2×, subtitles, media tracks, background playback and Android system PiP. Some YouTube-specific online behaviors and protected streams are deliberately unavailable.
