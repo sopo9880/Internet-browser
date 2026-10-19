@@ -116,6 +116,7 @@ jobs:
       - name: Validate real Chromium MV3 research source pin
         run: |
           python3 -m unittest discover -s tool/tests -p test_titanium_pin.py -v
+          python3 -m unittest discover -s tool/tests -p test_welcome_crx.py -v
           python3 tool/chromium/titanium_pin.py
           bash -n tool/chromium/build_titanium_prototype.sh
       - name: Clarify native compilation requirement

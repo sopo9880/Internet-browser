@@ -74,3 +74,20 @@ an isolated Linux runner (32+ GB RAM, 120+ GB storage); it produces a
 standalone research APK, NOT an embeddable Flutter AAR and NOT v0.2.0.
 See docs/CHROMIUM_NATIVE_BUILD.md. Chrome Web Store AdBlock execution,
 Flutter/media/ByeDPI integration and license review remain required.
+
+
+### First-run AdBlock recommendation (v0.2.0 development)
+
+A new Android install opens a welcome screen featuring the exact
+Chrome Web Store AdBlock gighmmpiobklfepjocnamgkkbiglidom.
+The user may install it (only once a real in-app Chromium extension
+host exists), or continue without installing. No external browser is
+used as a workaround and an unavailable engine cannot claim success.
+Existing v0.1.x user data is preserved and the onboarding can be
+revisited through the menu. Windows startup is unchanged.
+
+The native Chromium research build also bundles a signed MV3 welcome
+helper which can offer the official AdBlock store link on initial
+installation. See docs/CHROMIUM_NATIVE_BUILD.md for the limitations:
+this path has NOT been compiled or device-verified yet, and the
+research signing identity must be stabilized before production.

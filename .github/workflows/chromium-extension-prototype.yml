@@ -18,6 +18,7 @@ jobs:
       - name: Check trusted source pin and build script
         run: |
           python3 -m unittest discover -s tool/tests -p test_titanium_pin.py -v
+          python3 -m unittest discover -s tool/tests -p test_welcome_crx.py -v
           python3 tool/chromium/titanium_pin.py
           bash -n tool/chromium/build_titanium_prototype.sh
       - name: Build REAL Chromium 155 Android extensions source (separate research APK)

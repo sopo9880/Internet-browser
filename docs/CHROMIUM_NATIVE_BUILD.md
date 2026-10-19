@@ -108,3 +108,44 @@ A large isolated Linux Chromium runner is necessary for this source
 build. Standard GitHub-hosted Ubuntu runners are too small for the
 expected workspace. Having workflow YAML does not mean a runner
 exists, a Chromium engine has been compiled, or the APK is available.
+
+
+## First-run welcome and recommended AdBlock (added in this PR)
+
+The Flutter Android development shell now displays a first-run welcome page
+before browsing on a fresh install. It presents the exact AdBlock
+gighmmpiobklfepjocnamgkkbiglidom, with user-initiated install and
+installed/enabled verification through the real Chromium extension host.
+It does not silently install third-party extensions, and it disables
+installation when the native Chromium host is missing. A settings marker
+welcome_v0200_completed prevents repeat display; existing v0.1.x
+bookmarks, browsing history and DPI preferences are retained without
+forcing the migration welcome. The user can reopen the welcome via
+the Android browser's menu.
+
+For the standalone Titanium-based Chromium research APK, the native
+first-run equivalent is an Internet-browser-owned MV3 welcome extension
+(tool/chromium/welcome_extension/). Its service worker listens only
+for a genuine runtime.onInstalled(reason=install) event and opens the
+bundled local welcome HTML once. The HTML shows the exact AdBlock
+Chrome Web Store link and a continue button. AdBlock itself is not
+bundled or installed; the user must choose to install/approve it.
+
+The prototype builder uses tool/chromium/pack_welcome_crx.py to create
+a real, signed CRX3, and stages it via Titanium's existing
+extensions/dist/bundled.json and BUILD.gn extension bundling path.
+CI verifies the CRX3 signature, archive and fixed AdBlock ID, but has
+not executed this extension in a real Chromium APK.
+
+Production blocker: Research builds generate an ephemeral welcome
+signing key. This gives a new welcome extension ID on every build, so
+the native extension could show the page again across APK upgrades.
+A stable, securely stored signing key and proven first-run-only behavior
+on device are necessary before release. The key must never be checked
+into Git or bundled with an APK. A native first-run UI or retained
+Chromium profile marker may be preferable for the final app host.
+
+This workflow does not overcome the lack of a full compiled Chromium
+engine, Chromium-to-Flutter integration, ByeDPI transport, or real-device
+testing of the exact requested AdBlock. The v0.2.0 acceptance gate
+remains mandatory.

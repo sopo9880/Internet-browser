@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ad_blocker.dart';
 import 'chrome_extensions_screen.dart';
+import 'welcome_screen.dart';
 import 'chromium_navigation.dart';
 import 'address_parser.dart';
 import 'download_manager.dart';
@@ -1324,6 +1325,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
                         builder: (_) => const ChromeExtensionsScreen(),
                       ),
                     );
+                  case 'welcome':
+                    Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => WelcomeScreen(
+                          onContinue: () async {
+                            if (context.mounted) Navigator.of(context).pop();
+                          },
+                        ),
+                      ),
+                    );
                   case 'toggle_tabs':
                     setState(() => _showTabStrip = !_showTabStrip);
                 }
@@ -1344,6 +1355,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   const PopupMenuItem(
                     value: 'extensions',
                     child: Text('Chrome 확장 관리 (준비 중)'),
+                  ),
+                if (defaultTargetPlatform == TargetPlatform.android)
+                  const PopupMenuItem(
+                    value: 'welcome',
+                    child: Text('환영 화면 · AdBlock 설치 안내'),
                   ),
                 const PopupMenuItem(
                     value: 'settings', child: Text('광고·DPI 설정')),

@@ -52,6 +52,16 @@ SUBMODULE="$(git -C "$WORKSPACE/titanium/vanadium" rev-parse HEAD)"
 python3 "$SCRIPT_DIR/titanium_pin.py" --checkout "$WORKSPACE/titanium" \
   --head-sha "$HEAD" --vanadium-sha "$SUBMODULE"
 
+# Stage a signed, first-install MV3 welcome card inside the Chromium runtime.
+# This installs only OUR welcome helper; AdBlock is an explicit opt-in link.
+# Research keys are deliberately ephemeral and MUST be pinned before release.
+python3 "$SCRIPT_DIR/pack_welcome_crx.py" \
+  --source "$SCRIPT_DIR/welcome_extension" \
+  --template "$WORKSPACE/titanium/extensions/BUILD.gn" \
+  --dist "$WORKSPACE/titanium/extensions/dist" \
+  --key "$WORKSPACE/welcome-crx-research-private.pem"
+
+
 # Private research install identity; NEVER replace the signed v0.1.1 app.
 python3 - "$WORKSPACE/titanium/args.gn" "$WORKSPACE/titanium/build.sh" "$APP_PACKAGE" <<'PY'
 from pathlib import Path
