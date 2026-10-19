@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'chrome_extensions_screen.dart';
 import 'chromium_extensions.dart';
+import 'android_security_settings.dart';
 
 /// First-run Android welcome. User-facing installation is opt-in; the
 /// requested extension is never silently installed, and an unsupported
@@ -240,6 +241,20 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
+                ListTile(
+                  leading: const Icon(Icons.security_outlined),
+                  title: const Text('삼성 보안 위험 자동 차단 안내'),
+                  subtitle: const Text(
+                    '보안 설정을 열어 직접 확인합니다. 앱은 시스템 보안을 변경하지 않습니다.',
+                  ),
+                  onTap: () async {
+                    final opened = await AndroidSecuritySettings.open();
+                    if (!opened && mounted) {
+                      setState(() => _error =
+                          '보안 설정을 열지 못했습니다. 휴대폰 설정에서 직접 이동하세요.');
+                    }
+                  },
+                ),
                 const ListTile(
                   leading: Icon(Icons.tune),
                   title: Text('DPI 우회 설정'),

@@ -7,6 +7,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'android_security_settings.dart';
+
 enum UpdatePlatform { windows, android }
 
 /// An installer published as an asset of this project's official release.
@@ -323,6 +325,10 @@ class BrowserUpdateService {
       rethrow;
     }
   }
+
+  /// Open Android's security settings. On Samsung phones the user may need
+  /// Security and privacy > Auto Blocker; never toggle device security.
+  Future<bool> openAndroidSecuritySettings() => AndroidSecuritySettings.open();
 
   /// Open the exact Android per-app "install unknown apps" screen, leaving
   /// the final permission switch entirely under the user's control.

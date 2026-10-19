@@ -258,6 +258,22 @@ class _InstallerDownloadDialogState extends State<InstallerDownloadDialog> {
             },
             child: const Text('설치 허용 설정 열기'),
           ),
+        if (widget.update.platform == UpdatePlatform.android && hasResult)
+          TextButton.icon(
+            onPressed: () async {
+              final opened = await widget.service.openAndroidSecuritySettings();
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(opened
+                      ? '삼성: 설정 > 보안 및 개인정보 보호 > 보안 위험 자동 차단을 직접 확인하세요.'
+                      : '보안 설정을 열지 못했습니다. 휴대폰 설정에서 직접 이동하세요.'),
+                ),
+              );
+            },
+            icon: const Icon(Icons.security),
+            label: const Text('보안 위험 자동 차단 설정 열기'),
+          ),
         if (hasResult && _completionMessage == null)
           FilledButton(
             onPressed: _launching ? null : _launchInstaller,

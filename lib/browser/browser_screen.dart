@@ -1089,6 +1089,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
                       _checkForUpdates(automatic: false);
                     },
                   ),
+                  if (_usesChromium)
+                    ListTile(
+                      leading: const Icon(Icons.security),
+                      title: const Text('삼성 보안 위험 자동 차단 설정 안내'),
+                      subtitle: const Text(
+                        '휴대폰 보안 설정으로 이동합니다. 자동 차단 여부는 직접 선택하며 '
+                        '앱이 시스템 보호 기능을 끄지 않습니다.',
+                      ),
+                      onTap: () async {
+                        final opened =
+                            await _updates.openAndroidSecuritySettings();
+                        if (mounted) {
+                          _message(opened
+                              ? '삼성: 설정 > 보안 및 개인정보 보호 > 보안 위험 자동 차단을 확인하세요.'
+                              : '보안 설정을 열지 못했습니다. 휴대폰 설정에서 직접 이동하세요.');
+                        }
+                      },
+                    ),
                   const Divider(),
                   SwitchListTile(
                     secondary: const Icon(Icons.shield_outlined),
