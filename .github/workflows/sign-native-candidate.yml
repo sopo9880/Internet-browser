@@ -1,0 +1,147 @@
+name: Sign pinned Chromium candidate (UNVERIFIED, no release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/sign-native-candidate.yml
+      - tool/chromium/sign_candidate.py
+      - tool/tests/test_sign_candidate.py
+      - docs/SIGN_UNVERIFIED_NATIVE_CANDIDATE.md
+  workflow_dispatch:
+    inputs:
+      acknowledgement:
+        description: 'Type SIGN_UNVERIFIED_NO_RELEASE to sign the pinned candidate without runtime acceptance'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: internet-browser-unverified-candidate-signing
+  cancel-in-progress: false
+
+jobs:
+  safety:
+    name: Validate signing-only safeguards (no secrets)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test provenance and signing workflow safeguards
+        run: python3 -m unittest discover -s tool/tests -p 'test_sign_candidate.py' -v
+      - name: Explain limitations
+        run: |
+          echo 'This is a signing-only candidate, NOT a production release.'
+          echo 'Physical device tests remain after release. Android emulator smoke is NOT claimed.'
+
+  sign_candidate:
+    name: Official-key signature on UNVERIFIED pinned APK
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.acknowledgement == 'SIGN_UNVERIFIED_NO_RELEASE'
+    needs: safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify exact previous GitHub run, Android job and artifact identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/39225095884" > "$RUNNER_TEMP/source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/jobs/117970070549" > "$RUNNER_TEMP/source-job.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/12204054700" > "$RUNNER_TEMP/source-artifact.json"
+          python3 -m tool.chromium.sign_candidate metadata \
+            --run "$RUNNER_TEMP/source-run.json" \
+            --job "$RUNNER_TEMP/source-job.json" \
+            --artifact "$RUNNER_TEMP/source-artifact.json"
+      - name: Download ONLY the pinned prior Android Chromium APK (no compilation)
+        uses: actions/download-artifact@v4
+        with:
+          name: android-titanium-native-candidate
+          run-id: 39225095884
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: build/pinned-native
+      - name: Check source APK, version, package, provenance and disposable signer before secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT2="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name aapt2 | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$AAPT2" && test -x "$APKSIGNER"
+          python3 -m tool.chromium.sign_candidate source \
+            --apk build/pinned-native/native-chromium.apk \
+            --provenance build/pinned-native/provenance.json \
+            --aapt2 "$AAPT2" --apksigner "$APKSIGNER"
+      - name: Sign validated native candidate with EXISTING v0.2.0 production certificate
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/internet-browser-sign-candidate.p12"
+          ALIGNED="$RUNNER_TEMP/internet-browser-native-candidate-aligned.apk"
+          trap 'rm -f "$KEYSTORE" "$ALIGNED"' EXIT
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          raw = base64.b64decode(os.environ["ANDROID_KEYSTORE_BASE64"], validate=True)
+          if len(raw) < 64:
+              raise SystemExit("Missing or malformed existing release signing key")
+          Path(os.environ["RUNNER_TEMP"], "internet-browser-sign-candidate.p12").write_bytes(raw)
+          PY
+          keytool -list -storetype PKCS12 -keystore "$KEYSTORE" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" \
+            | grep -q 'PrivateKeyEntry'
+          ZIPALIGN="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name zipalign | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT2="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name aapt2 | sort -V | tail -n 1)"
+          test -x "$ZIPALIGN" && test -x "$APKSIGNER" && test -x "$AAPT2"
+          mkdir -p dist
+          SIGNED="dist/Internet-browser-Android-v0.2.1-UNVERIFIED-SIGNED-CANDIDATE.apk"
+          "$ZIPALIGN" -f -p 4 build/pinned-native/native-chromium.apk "$ALIGNED"
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE" --ks-type PKCS12 \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$SIGNED" "$ALIGNED"
+          python3 -m tool.chromium.sign_candidate signed \
+            --candidate build/pinned-native/native-chromium.apk \
+            --signed "$SIGNED" \
+            --aapt2 "$AAPT2" --apksigner "$APKSIGNER" \
+            --report dist/UNVERIFIED-SIGNATURE-REPORT.json
+          cat > dist/UNVERIFIED-DO-NOT-DISTRIBUTE-AS-RELEASE.txt <<'EOF'
+          UNVERIFIED SIGNED CANDIDATE: v0.2.1 native Chromium source build.
+          Signed with the existing production certificate, but NOT a verified release.
+          Android navigation, AdBlock MV3, ByeDPI, media and data migration have NOT passed integration tests.
+          Do not distribute as an update to the existing v0.2.0 installation.
+          No GitHub release or tag was created. Physical-device validation remains a post-release task.
+          Source CI: https://github.com/sopo9880/Internet-browser/actions/runs/39225095884
+          EOF
+          (cd dist && sha256sum Internet-browser-Android-v0.2.1-UNVERIFIED-SIGNED-CANDIDATE.apk > SHA256SUMS.txt)
+      - name: Keep signed candidate ONLY as a short-lived Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNVERIFIED-official-key-native-candidate-v0.2.1-NOT-RELEASE
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
