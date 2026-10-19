@@ -10,7 +10,7 @@ from tool.chromium.sign_candidate import (
     ARTIFACT_ID, ARTIFACT_NAME, ARTIFACT_ZIP_SHA256, BUILT_HEAD_SHA,
     BUILD_BASE_SHA, BUILD_MERGE_SHA,
     JOB_ID, PRODUCTION_CERT_SHA256, REPO_ID, RUN_ID,
-    verify_apk_identity, verify_provenance, verify_signed_candidate,
+    parse_verified_certificate_sha256, verify_apk_identity, verify_provenance, verify_signed_candidate,
     verify_source_metadata,
 )
 from tool.chromium.titanium_pin import (
@@ -117,7 +117,7 @@ class SignCandidateTests(unittest.TestCase):
             command.side_effect = [
                 "io.github.sopo9880.internet_browser\n",
                 "package: name='io.github.sopo9880.internet_browser' versionCode='2001001' versionName='0.2.1'\n",
-                "Signer #1 certificate SHA-256 digest: " + PRODUCTION_CERT_SHA256 + "\n",
+                "Verifies\nNumber of signers: 1\nSigner #1 certificate SHA-256 digest: " + PRODUCTION_CERT_SHA256 + "\n",
             ]
             actual = verify_apk_identity(
                 Path("candidate.apk"), Path("aapt2"), Path("apksigner"))
@@ -128,6 +128,61 @@ class SignCandidateTests(unittest.TestCase):
             ]
             with self.assertRaisesRegex(ValueError, "package name"):
                 verify_apk_identity(Path("candidate.apk"), Path("aapt2"), Path("apksigner"))
+
+    def test_apksigner_37_certificate_scheme_labels_are_supported(self):
+        digest = PRODUCTION_CERT_SHA256
+        fixtures = (
+            "Verifies\nNumber of signers: 1\n"
+            "V2 Signer: certificate SHA-256 digest: " + digest + "\n",
+            "Verifies\nNumber of signers: 1\n"
+            "V3.0 Signer: certificate SHA-256 digest: " + digest + "\n",
+            "Verifies\nNumber of signers: 1\n"
+            "V1 Signer: certificate SHA-256 digest: " + digest + "\n"
+            "V2 Signer: certificate SHA-256 digest: " + digest + "\n"
+            "V3.0 Signer: certificate SHA-256 digest: " + digest + "\n",
+            "Verifies\nNumber of signers: 1\n"
+            "Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-256 digest: " + digest + "\n",
+        )
+        for case in fixtures:
+            with self.subTest(text=case):
+                self.assertEqual(parse_verified_certificate_sha256(case), digest)
+
+    def test_apksigner_rejects_multiple_or_inconsistent_signing_certificates(self):
+        digest = PRODUCTION_CERT_SHA256
+        conflicting = "0" * 64
+        fixtures = (
+            "Verifies\nNumber of signers: 2\n"
+            "Signer #1 certificate SHA-256 digest: " + digest + "\n"
+            "Signer #2 certificate SHA-256 digest: " + conflicting + "\n",
+            "Verifies\nNumber of signers: 1\n"
+            "V2 Signer: certificate SHA-256 digest: " + digest + "\n"
+            "V3.0 Signer: certificate SHA-256 digest: " + conflicting + "\n",
+            "Verifies\nNumber of signers: 1\n"
+            "Signer #1 certificate SHA-256 digest: " + digest + "\n"
+            "Signer #2 certificate SHA-256 digest: " + digest + "\n",
+            "Verifies\nNumber of signers: 1\n"
+            "Signer #1 certificate SHA-1 digest: " + "a" * 40 + "\n",
+            "Verifies\nNumber of signers: 1\n"
+            "V2 Signer: certificate SHA-256 digest: not-a-digest\n",
+            "Verifies\n"
+            "Signer #1 certificate SHA-256 digest: " + digest + "\n",
+        )
+        for case in fixtures:
+            with self.subTest(text=case), self.assertRaises(ValueError):
+                parse_verified_certificate_sha256(case)
+
+    def test_apk_identity_accepts_new_apksigner_certificate_output(self):
+        with patch("tool.chromium.sign_candidate._output") as command:
+            command.side_effect = [
+                "io.github.sopo9880.internet_browser\n",
+                "package: name='io.github.sopo9880.internet_browser' versionCode='2001001' versionName='0.2.1'\n",
+                "Verifies\nNumber of signers: 1\n"
+                "V2 Signer: certificate SHA-256 digest: " + PRODUCTION_CERT_SHA256 + "\n",
+            ]
+            self.assertEqual(
+                verify_apk_identity(Path("candidate.apk"), Path("aapt2"), Path("apksigner")),
+                PRODUCTION_CERT_SHA256,
+            )
 
     def test_signed_candidate_rejects_incorrect_certificate(self):
         with tempfile.TemporaryDirectory() as directory:
