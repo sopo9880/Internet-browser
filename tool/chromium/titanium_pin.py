@@ -19,6 +19,7 @@ VANADIUM_SHA = "20526e052e304b62cf3e80114b423934e2d1c540"
 CHROMIUM_VERSION = "155.0.8059.84"
 REQUIRED_ADBLOCK_ID = "gighmmpiobklfepjocnamgkkbiglidom"
 PROTOTYPE_PACKAGE = "io.github.sopo9880.internet_browser.chromiumtest"
+PRODUCT_PACKAGE = "io.github.sopo9880.internet_browser"
 SOURCE_LICENSE = "GPL-2.0"
 SOURCE_TREE_IS_EMBEDDABLE = False
 
@@ -49,12 +50,25 @@ def verify_checkout(source: Path, head_sha: str, vanadium_sha: str) -> None:
         raise FileNotFoundError("Missing pinned Vanadium Chromium version")
 
 
-def write_prototype_report(path: Path, apk: Path) -> None:
+def write_prototype_report(
+    path: Path, apk: Path, package: str = PROTOTYPE_PACKAGE
+) -> None:
     validate_pins()
+    if package not in (PROTOTYPE_PACKAGE, PRODUCT_PACKAGE):
+        raise ValueError("Unknown native Chromium target package")
     if not apk.is_file() or apk.stat().st_size == 0:
         raise FileNotFoundError("No actual Chromium extensions APK compiled")
+    product = package == PRODUCT_PACKAGE
     data = {
-        "kind": "RESEARCH_ONLY_STANDALONE_CHROMIUM_EXTENSIONS_APK",
+        "kind": (
+            "CHROMIUM_NATIVE_PRODUCT_CANDIDATE_NOT_RELEASE"
+            if product else "RESEARCH_ONLY_STANDALONE_CHROMIUM_EXTENSIONS_APK"
+        ),
+        "built_as_chromium_android_application": True,
+        "disposable_test_signer_not_upgrade_compatible": True,
+        "candidate_android_package": package,
+        "production_android_package_id": PRODUCT_PACKAGE,
+        "production_id_matched": product,
         "engine_source": SOURCE_REPO,
         "engine_source_commit": SOURCE_SHA,
         "vanadium_source_commit": VANADIUM_SHA,
@@ -80,6 +94,7 @@ def main() -> None:
     p.add_argument("--head-sha")
     p.add_argument("--vanadium-sha")
     p.add_argument("--apk", type=Path)
+    p.add_argument("--package", default=PROTOTYPE_PACKAGE)
     p.add_argument("--report", type=Path)
     args = p.parse_args()
     validate_pins()
@@ -90,7 +105,7 @@ def main() -> None:
     if args.apk:
         if not args.report:
             p.error("Compiled APK requires --report")
-        write_prototype_report(args.report, args.apk)
+        write_prototype_report(args.report, args.apk, args.package)
     print("Chromium 155 extension-engine source pin verified; no device success implied")
 
 

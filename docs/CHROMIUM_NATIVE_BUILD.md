@@ -154,3 +154,41 @@ in-app Chromium engine, Chromium-to-Flutter integration or ByeDPI transport.
 Real-device AdBlock verification is now a post-release activity. See
 docs/POST_RELEASE_ANDROID_VALIDATION.md. Do not advertise native extension
 support based only on the successful Flutter/WebView package build.
+
+## v0.2.1: compile the REAL Titanium-based Android product candidate
+
+The old Chromium/Flutter AAR contract is not a working Chromium engine.
+The shorter real native Android route is to **build Titanium as the Android
+browser application itself**, preserving Windows Flutter separately.
+
+We now provide an explicit second variant of the pinned Titanium ARM64
+builder. On a dedicated isolated `chromium-large` Linux runner, run:
+
+    bash tool/chromium/build_titanium_prototype.sh /empty/large/workspace product-candidate
+
+This configures the actual Chromium `chrome_public_apk` target with
+`chrome_public_manifest_package = "io.github.sopo9880.internet_browser"`
+instead of constructing a stub AAR. The produced APK must pass an aapt2
+package-name check and Android apksigner verification.
+
+- The product candidate is **signed with a short-lived research key**, NOT
+  the key used by v0.2.0. Never install this over existing user data:
+  Android will reject the mismatched signing certificate.
+- This is a full Chromium browser candidate, not an embedded engine inside
+  Flutter. A genuinely usable browser still needs integration of ByeDPI,
+  video, user settings, versionCode, Chrome extension workflows, and a
+  non-destructive migration of previous Flutter user data.
+- The same Chromium source with a production signing path will be needed
+  for an installable 0.2.1 upgrade. Never use the production key in a
+  PR/self-hosted builder or third-party build script.
+- Titanium/Vanadium are GPL-2.0. Release requires complete corresponding
+  source and license notices, not just a modified binary.
+- The strict release gate remains RED; no claim of successful embedded AAR
+  or validated Android integration is made by this change.
+
+To request the expensive source build, apply `chromium-build` to the
+existing development PR #4. Workflow:
+`.github/workflows/chromium-extension-prototype.yml`.
+The job needs a connected `[self-hosted, linux, x64, chromium-large]`
+runner and can queue if none is available. A passing lightweight Flutter
+CI run is NOT proof that this real Chromium compilation succeeded.

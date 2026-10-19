@@ -1,19 +1,33 @@
 #!/usr/bin/env bash
-# ACTUAL extension-capable Android Chromium research source build.
-# Pinned Titanium Chromium 155. Not a Flutter AAR or product release.
-# Run ONLY on an isolated, disposable, dedicated x86_64 Linux runner.
+# Actual source build of Chromium with Titanium's Chrome extensions.
+# Second arg: research (isolated ID) or product-candidate (real app ID).
+# Both use disposable signing keys; NEVER install product-candidate over v0.2.0.
+# This is NOT an AAR, and NEVER a signed release.
+# Run ONLY on an isolated disposable dedicated Linux x86_64 large runner.
 set -euo pipefail
 umask 077
 
-if [ "$#" -ne 1 ]; then
-  echo "Usage: bash build_titanium_prototype.sh /isolated/large/workspace" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  echo "Usage: build_titanium_prototype.sh /empty/large/workspace [research|product-candidate]" >&2
   exit 2
 fi
 WORKSPACE="$(realpath -m "$1")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_SHA="e59e03dc83bc940d73cf29a7683286fca390b393"
 VANADIUM_SHA="20526e052e304b62cf3e80114b423934e2d1c540"
-APP_PACKAGE="io.github.sopo9880.internet_browser.chromiumtest"
+FLAVOR="${2:-research}"
+case "$FLAVOR" in
+  research)
+    APP_PACKAGE="io.github.sopo9880.internet_browser.chromiumtest"
+    OUTPUT_NAME="Chromium-155-EXTENSIONS-RESEARCH-ONLY.apk"
+    ;;
+  product-candidate)
+    APP_PACKAGE="io.github.sopo9880.internet_browser"
+    OUTPUT_NAME="Internet-browser-Titanium-ARM64-PRODUCT-CANDIDATE-NOT-INSTALLABLE-UPGRADE.apk"
+    ;;
+  *)
+    echo "Unsupported Chromium build flavor: $FLAVOR" >&2; exit 2 ;;
+esac
 
 if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
   echo "Chromium source builder requires Linux x86_64" >&2
@@ -62,33 +76,12 @@ python3 "$SCRIPT_DIR/pack_welcome_crx.py" \
   --key "$WORKSPACE/welcome-crx-research-private.pem"
 
 
-# Private research install identity; NEVER replace the signed v0.1.1 app.
-python3 - "$WORKSPACE/titanium/args.gn" "$WORKSPACE/titanium/build.sh" "$APP_PACKAGE" <<'PY'
-from pathlib import Path
-import sys
-gn_path, build_path, package = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-args = gn_path.read_text(encoding="utf-8")
-old_package = 'chrome_public_manifest_package = "io.github.jqssun.helium"'
-old_cpu = 'target_cpu = "arm"'
-if args.count(old_package) != 1 or args.count(old_cpu) != 1:
-    raise SystemExit("Titanium Android GN build template changed; review upstream")
-args = args.replace(old_package, f'chrome_public_manifest_package = "{package}"')
-args = args.replace(old_cpu, 'target_cpu = "arm64"')
-gn_path.write_text(args, encoding="utf-8")
-
-build = build_path.read_text(encoding="utf-8")
-arm_block = (
-    "autoninja -C out/Default chrome_public_apk\n"
-    "mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-armeabi-v7a.apk\n"
-    "sed -i 's/target_cpu = \"arm\"/target_cpu = \"arm64\"/' out/Default/args.gn\n"
-)
-arm_sign = "sign_apk out/tmp/$VERSION-armeabi-v7a.apk out/release/$VERSION-armeabi-v7a.apk\n"
-if build.count(arm_block) != 1 or build.count(arm_sign) != 1:
-    raise SystemExit("Titanium build.sh layout changed; cannot safely isolate ARM64")
-build = build.replace(arm_block, "# ARM64-only isolated research build\n")
-build = build.replace(arm_sign, "")
-build_path.write_text(build, encoding="utf-8")
-PY
+# Build a *real* native Chrome APK with the desired product package ID.
+# A compiled Chrome application is NOT an embeddable Flutter AndroidView AAR.
+python3 "$SCRIPT_DIR/titanium_product.py" configure \
+  --args "$WORKSPACE/titanium/args.gn" \
+  --build "$WORKSPACE/titanium/build.sh" \
+  --package "$APP_PACKAGE"
 
 # Ephemeral signing keys. This is NOT the Internet-browser production key.
 # Avoid loading any repository signing secret into third-party Chromium builds.
@@ -114,9 +107,18 @@ if [ -z "$APK" ] || [ ! -s "$APK" ]; then
   echo "Real native Chromium ARM64 extension prototype APK was not produced" >&2
   exit 1
 fi
+AAPT2="$(find "$WORKSPACE/titanium/chromium/src/third_party/android_sdk/public/build-tools" -type f -name aapt2 | sort -V | tail -n1)"
+APKSIGNER="$(find "$WORKSPACE/titanium/chromium/src/third_party/android_sdk/public/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+test -n "$AAPT2" && test -n "$APKSIGNER"
+python3 "$SCRIPT_DIR/titanium_product.py" verify \
+  --apk "$APK" --aapt2 "$AAPT2" --package "$APP_PACKAGE"
+"$APKSIGNER" verify --verbose "$APK"
 mkdir -p "$WORKSPACE/output"
-cp "$APK" "$WORKSPACE/output/Chromium-155-EXTENSIONS-RESEARCH-ONLY.apk"
+cp "$APK" "$WORKSPACE/output/$OUTPUT_NAME"
 python3 "$SCRIPT_DIR/titanium_pin.py" \
-  --apk "$WORKSPACE/output/Chromium-155-EXTENSIONS-RESEARCH-ONLY.apk" \
+  --apk "$WORKSPACE/output/$OUTPUT_NAME" \
+  --package "$APP_PACKAGE" \
   --report "$WORKSPACE/output/provenance.json"
-echo "Native Chromium extension-source APK compiled. IN-APP EMBEDDING AND ADBLOCK NOT TESTED."
+echo "Compiled and checked native Chromium $FLAVOR APK, package=$APP_PACKAGE."
+echo "Signed with disposable key; NOT compatible as update over existing signed application."
+echo "Not a Flutter AAR. ByeDPI/media/data migration and emulator tests remain pending."

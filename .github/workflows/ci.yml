@@ -119,6 +119,7 @@ jobs:
           python3 -m unittest discover -s tool/tests -p test_welcome_crx.py -v
           python3 tool/chromium/titanium_pin.py
           bash -n tool/chromium/build_titanium_prototype.sh
+          python3 -m unittest discover -s tool/tests -p test_titanium_product.py -v
       - name: Clarify native compilation requirement
         run: |
           echo "Source pinned and prototype builder syntax checked."
