@@ -63,3 +63,14 @@ docs/ANDROID_CHROMIUM_EXTENSIONS.md. The upstream build script
 tool/chromium/build_android.sh produces only a STOCK Chromium baseline,
 not a Chrome Web Store extension-capable browser. AdBlock is not working
 until actual native engine integration and physical-device verification.
+
+
+### Real Chromium extension-source build phase (not yet completed)
+
+Research pin: Chromium 155 Titanium/Vanadium Android fork, rather than
+the old Kiwi 105 engine. This supplies a reproducible Android browser
+source tree with real extension runtime patches. Its full build needs
+an isolated Linux runner (32+ GB RAM, 120+ GB storage); it produces a
+standalone research APK, NOT an embeddable Flutter AAR and NOT v0.2.0.
+See docs/CHROMIUM_NATIVE_BUILD.md. Chrome Web Store AdBlock execution,
+Flutter/media/ByeDPI integration and license review remain required.

@@ -53,3 +53,15 @@ Build both EXE bundle and APK against the same SHA, verify on real devices, and 
 The Android development app now deliberately blocks WebView fallback while
 Chromium is not linked. A stock Chromium APK or build script does not pass
 the mandatory AdBlock device test.
+
+
+## Real Chromium Android extension source (October 2026 research phase)
+
+The source/build path now pins Chromium 155-based Titanium and its
+Vanadium revision for an actual extension-capable Android prototype.
+Unlike stock ChromePublic.apk, the pinned fork documents Chrome Web
+Store extension installation. However its build still produces a
+standalone APK, not an embedded Flutter engine. See
+docs/CHROMIUM_NATIVE_BUILD.md for runner requirements and limitations.
+The prototype APK never replaces signed v0.1.1 and cannot satisfy
+v0.2.0's AdBlock device acceptance gate on its own.

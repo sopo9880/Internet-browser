@@ -109,6 +109,21 @@ jobs:
           path: dist/Internet-browser-Windows-Setup-v*.exe
           if-no-files-found: error
 
+  chromium_extension_source_pin:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate real Chromium MV3 research source pin
+        run: |
+          python3 -m unittest discover -s tool/tests -p test_titanium_pin.py -v
+          python3 tool/chromium/titanium_pin.py
+          bash -n tool/chromium/build_titanium_prototype.sh
+      - name: Clarify native compilation requirement
+        run: |
+          echo "Source pinned and prototype builder syntax checked."
+          echo "Real Chromium engine compilation requires a separate 32GB/120GB runner."
+          echo "AdBlock installation and in-app engine remain UNVERIFIED."
+
   android_chromium_adblock_acceptance:
     runs-on: ubuntu-24.04
     needs: [android]

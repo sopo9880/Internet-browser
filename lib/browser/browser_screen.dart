@@ -474,7 +474,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
     await _detectMedia(tab);
     try {
-      if (!_usesChromium) await _evaluatePageScript(tab, r'''
+      if (!_usesChromium) {
+        await _evaluatePageScript(tab, r'''
 (function() {
  if (window.__internetBrowserFocusInstalled) return;
  window.__internetBrowserFocusInstalled = true;
@@ -485,6 +486,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
  }, {passive: true, capture: true});
 })();
 ''');
+      }
     } catch (_) {}
   }
 
@@ -1108,7 +1110,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     title: const Text('ByeDPI 우회 엔진'),
                     subtitle: Text(_usesChromium
                         ? 'Android Chromium 네트워크 우회 엔진 연결 대기 · 설정값 저장 가능'
-                        : _dpi.status + '\nWindows: 변경 후 앱 재시작 필요'),
+                        : '${_dpi.status}\nWindows: 변경 후 앱 재시작 필요'),
                     value: _prefs?.getBool('dpi_enabled') ?? false,
                     onChanged: (value) async {
                       await _prefs?.setBool('dpi_enabled', value);

@@ -1,0 +1,37 @@
+name: Android Chromium MV3 source prototype (no release)
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native_extension_source_build:
+    # Enable by applying the 'chromium-build' PR label when a suitable
+    # isolated self-hosted runner is registered. No production credentials.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'chromium-build')
+    runs-on: [self-hosted, linux, x64, chromium-large]
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check trusted source pin and build script
+        run: |
+          python3 -m unittest discover -s tool/tests -p test_titanium_pin.py -v
+          python3 tool/chromium/titanium_pin.py
+          bash -n tool/chromium/build_titanium_prototype.sh
+      - name: Build REAL Chromium 155 Android extensions source (separate research APK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKSPACE="$RUNNER_TEMP/titanium-extension-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          bash tool/chromium/build_titanium_prototype.sh "$WORKSPACE"
+          mkdir -p build/chromium-prototype
+          cp "$WORKSPACE/output/provenance.json" build/chromium-prototype/
+          cp "$WORKSPACE/output/Chromium-155-EXTENSIONS-RESEARCH-ONLY.apk" build/chromium-prototype/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Chromium-155-extension-engine-RESEARCH-NOT-INTEGRATED
+          path: build/chromium-prototype/*
+          retention-days: 1
+          if-no-files-found: error
