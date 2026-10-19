@@ -11,8 +11,12 @@ from tool.chromium.titanium_product import (
 )
 
 
-ARGS = SOURCE_PACKAGE + "\n" + SOURCE_CPU + "\n"
-BUILD = ARM32_TARGET + (
+ARGS = (
+    SOURCE_PACKAGE + "\n" + SOURCE_CPU + "\n"
+    + "v8_enable_drumbrake = true\n"
+    + "v8_drumbrake_bounds_checks = true\n"
+)
+BUILD = "#!/bin/bash\nsource common.sh\n" + ARM32_TARGET + (
     "autoninja -C out/Default chrome_public_apk chrome_public_bundle\n"
 ) + ARM32_SIGN + "sign_apk out/tmp/$VERSION-arm64-v8a.apk out/release/$VERSION-arm64-v8a.apk\n"
 
@@ -22,8 +26,29 @@ class TitaniumNativeProductTests(unittest.TestCase):
         gn, build = prepare_source(ARGS, BUILD, PRODUCT_PACKAGE)
         self.assertIn(f'chrome_public_manifest_package = "{PRODUCT_PACKAGE}"', gn)
         self.assertIn('target_cpu = "arm64"', gn)
+        self.assertIn("v8_enable_drumbrake = false", gn)
+        self.assertIn("v8_drumbrake_bounds_checks = false", gn)
+        self.assertIn("set -e\nset -o pipefail\nsource common.sh", build)
         self.assertNotIn("armeabi-v7a", build)
         self.assertIn("autoninja -C out/Default chrome_public_apk chrome_public_bundle", build)
+
+    def test_fail_closed_when_upstream_drops_known_android_gn_switches(self):
+        for changed in (
+            ARGS.replace("v8_enable_drumbrake = true", ""),
+            ARGS.replace("v8_drumbrake_bounds_checks = true", ""),
+        ):
+            with self.subTest(changed=changed), self.assertRaisesRegex(
+                ValueError, "template changed",
+            ):
+                prepare_source(changed, BUILD, PRODUCT_PACKAGE)
+
+    def test_fail_closed_when_upstream_script_loses_failfast_anchor(self):
+        with self.assertRaisesRegex(ValueError, "template changed"):
+            prepare_source(
+                ARGS,
+                BUILD.replace("#!/bin/bash\nsource common.sh\n", ""),
+                PRODUCT_PACKAGE,
+            )
 
     def test_native_product_uses_expected_upgrade_version_code(self):
         gn, _ = prepare_source(

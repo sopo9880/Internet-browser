@@ -101,6 +101,13 @@ export LOCAL_TEST_JKS="$(base64 -w0 "$WORKSPACE/local.properties")"
 export STORE_TEST_JKS="$(base64 -w0 "$WORKSPACE/prototype.jks")"
 unset PASSWORD
 
+# The pinned upstream build applies Vanadium patches using git am inside a
+# freshly initialized Chromium git checkout. On a self-hosted WSL runner,
+# there may be no git user.name/user.email: git am then fails and upstream
+# previously continued into an incomplete GN tree. Scope CI identity to this
+# subprocess only; never mutate the developer's global git configuration.
+export GIT_COMMITTER_NAME="Internet-browser Chromium Build"
+export GIT_COMMITTER_EMAIL="internet-browser-ci@users.noreply.github.com"
 # The source-pinned upstream build requires system dependencies and runs apt.
 # Do not execute on a shared or developer workstation.
 cd "$WORKSPACE/titanium"

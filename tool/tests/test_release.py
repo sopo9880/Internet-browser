@@ -136,6 +136,13 @@ class WorkflowSafetyTests(unittest.TestCase):
             (root / ".github/workflows/chromium-extension-prototype.yml").exists()
         )
 
+    def test_unattended_wsl_build_has_scoped_git_am_identity(self):
+        root = Path(__file__).resolve().parents[2]
+        builder = (root / "tool/chromium/build_titanium_prototype.sh").read_text()
+        self.assertIn('export GIT_COMMITTER_NAME=', builder)
+        self.assertIn('export GIT_COMMITTER_EMAIL=', builder)
+        self.assertNotIn("git config --global user.", builder)
+
     def test_wsl_chromium_runner_is_resource_capped(self):
         root = Path(__file__).resolve().parents[2]
         builder = (root / "tool/chromium/build_titanium_prototype.sh").read_text()

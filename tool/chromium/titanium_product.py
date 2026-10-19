@@ -65,6 +65,20 @@ def prepare_source(
     args = replace_exact(args, SOURCE_PACKAGE,
                          f'chrome_public_manifest_package = "{package}"')
     args = replace_exact(args, SOURCE_CPU, 'target_cpu = "arm64"')
+    # Upstream Titanium targets Android ARM64; V8 DrumBrake is not supported
+    # on Android, including the arm64 build (the upstream GN args enable it).
+    # A silent GN failure previously cascaded into "missing APK" errors.
+    args = replace_exact(args, "v8_enable_drumbrake = true",
+                         "v8_enable_drumbrake = false")
+    args = replace_exact(args, "v8_drumbrake_bounds_checks = true",
+                         "v8_drumbrake_bounds_checks = false")
+    # Pinned upstream build.sh does not fail on git am failures: gclient
+    # then fetches dependencies for a Chromium tree with NO Titanium patches.
+    # Keep git am and patch errors fatal, not just the last sign_apk error.
+    build = replace_exact(
+        build, "#!/bin/bash\nsource common.sh\n",
+        "#!/bin/bash\nset -e\nset -o pipefail\nsource common.sh\n",
+    )
     build = replace_exact(build, ARM32_TARGET, "# ARM64-only native Chromium candidate\n")
     build = replace_exact(build, ARM32_SIGN, "")
     arm64_target = "autoninja -C out/Default chrome_public_apk chrome_public_bundle"

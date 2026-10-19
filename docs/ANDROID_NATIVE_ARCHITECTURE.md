@@ -133,3 +133,22 @@ workflows from the pre-optimization branch require that legacy label
 and must not run on the new resource-constrained machine. GitHub's
 automatic self-hosted / linux / x64 labels still apply. The obsolete
 runs can be cancelled manually from the Actions UI.
+
+
+### Native build attempt #39213302065: observed failure and repair
+
+The personal WSL2 Chromium job started and resource preflight **passed**
+with 23 GiB Linux RAM, 24 GiB swap, 12 CPUs, and >950 GiB disk free.
+It did **not** compile a Chromium APK. The pinned Titanium build.sh ran
+git am with NO committer identity on the WSL runner. Git stopped at
+"fatal: empty ident name"; the upstream build script lacked fail-fast
+handling and continued, leading to missing Titanium patched files,
+filter_list_download.py errors, GN v8 DrumBrake Android unsupported
+assertions and signing a missing APK.
+
+The next PR commit repairs the **actual first failure**, setting scoped
+GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL just for the upstream build
+and injecting 'set -e' and pipefail into the exact pinned build.sh header.
+The source GN args also turn off the unsupported Android V8 DrumBrake
+flags. Tests enforce that known pinned-template deviations abort early.
+A successful engine build or emulator feature test is still UNVERIFIED.
