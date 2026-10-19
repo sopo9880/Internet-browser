@@ -29,9 +29,6 @@ jobs:
       - name: Validate 0.x version and calculate increasing Android versionCode
         id: version
         run: python3 tool/release_metadata.py
-      - name: Block v0.2.1 release without Chromium and automated smoke evidence
-        if: steps.version.outputs.version == '0.2.1'
-        run: python3 -m tool.chromium.require_native_engine
       - name: Skip a version already released
         id: existing
         env:
@@ -65,117 +62,170 @@ jobs:
           flutter-version: '3.35.7'
           channel: stable
       - name: Generate native project wrappers
-        run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android,windows .
+        run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
       - run: git show HEAD:test/widget_test.dart > test/widget_test.dart
-      - run: python3 tool/prepare_platforms.py
       - name: Verify release signing template without accessing keys
         run: python3 tool/configure_android_signing.py
       - name: Check Python release metadata and signing helpers
         run: python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
       - run: flutter pub get
-      - name: Generate parcel launcher icon for Android and Windows
-        run: dart run flutter_launcher_icons
+      - name: Generate Windows icon for static checks
+        run: dart run flutter_launcher_icons -f flutter_launcher_icons_windows.yaml
       - run: dart format --output=write lib test
       - run: flutter analyze
       - run: flutter test
 
   android:
+    # Genuine Chromium-native Android build; NEVER Flutter's empty shell.
+    # Untrusted upstream compilation happens on isolated self-hosted hardware.
+    # Production signing secrets are NEVER available to this runner.
     needs: [prepare, quality]
     if: needs.prepare.outputs.publish == 'true'
+    runs-on: [self-hosted, linux, x64, chromium-large]
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate 0.x native product version metadata
+        run: python3 tool/release_metadata.py
+      - name: Compile pinned native Titanium Android Chromium product
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r BROWSER_NATIVE_VERSION BROWSER_NATIVE_VERSION_CODE < <(
+            python3 -c 'from tool.release_metadata import parse_pubspec; from pathlib import Path; m=parse_pubspec(Path("pubspec.yaml").read_text()); print(m.version, m.version_code)'
+          )
+          export BROWSER_NATIVE_VERSION BROWSER_NATIVE_VERSION_CODE
+          WORKSPACE="$RUNNER_TEMP/titanium-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          bash tool/chromium/build_titanium_prototype.sh "$WORKSPACE" product-candidate
+          mkdir -p build/android-native
+          cp "$WORKSPACE/output/"*PRODUCT-CANDIDATE*.apk build/android-native/native-chromium.apk
+          cp "$WORKSPACE/output/provenance.json" build/android-native/provenance.json
+          test -s build/android-native/native-chromium.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-native-chromium-candidate
+          path: build/android-native/*
+          if-no-files-found: error
+          retention-days: 14
+
+  android_gate:
+    # Source compilation is necessary but never sufficient:
+    # require Android navigation/MV3 AdBlock/ByeDPI/media/data-migration proof.
+    needs: [prepare, quality, android]
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
-    env:
-      BROWSER_ANDROID_NDK_VERSION: '27.3.13750724'
-      VERSION: ${{ needs.prepare.outputs.version }}
-      VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-native-chromium-candidate
+          path: build/android-native
+      - name: Block incomplete native Chromium before production signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r VERSION VERSION_CODE < <(
+            python3 -c 'from tool.release_metadata import parse_pubspec; from pathlib import Path; m=parse_pubspec(Path("pubspec.yaml").read_text()); print(m.version, m.version_code)'
+          )
+          python3 -m tool.chromium.require_native_engine \
+            --apk build/android-native/native-chromium.apk \
+            --provenance build/android-native/provenance.json \
+            --smoke-report build/android-native/android-ci-smoke.json \
+            --version "$VERSION" --version-code "$VERSION_CODE" \
+            --integration-commit "$GITHUB_SHA"
+
+  android_sign:
+    # Secrets are exposed ONLY on this trusted GitHub-hosted MAIN release job,
+    # AFTER native source, automated tests and functional acceptance pass.
+    needs: [prepare, quality, android, android_gate]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: subosito/flutter-action@v2
+      - uses: actions/download-artifact@v4
         with:
-          flutter-version: '3.35.7'
-          channel: stable
-      - name: Generate native Android project
-        run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android .
-      - run: python3 tool/prepare_platforms.py
-      - run: flutter pub get
-      - name: Generate parcel launcher icon for Android and Windows
-        run: dart run flutter_launcher_icons
-      - name: Build pinned Android-native ByeDPI SOCKS5 engines
-        run: python3 tool/build_android_byedpi.py
-      - name: Materialize release keystore and configure Gradle
-        # Secrets are available ONLY in this trusted, main-branch release job.
+          name: release-native-chromium-candidate
+          path: build/android-native
+      - name: Validate existing production Android keystore privately
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: python3 tool/configure_android_signing.py --write
-      - name: Diagnose Android keystore and alias safely
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          blob = base64.b64decode(os.environ["ANDROID_KEYSTORE_BASE64"], validate=True)
+          if len(blob) < 64:
+              raise SystemExit("Invalid production keystore")
+          Path(os.environ["RUNNER_TEMP"], "internet-browser-release.p12").write_bytes(blob)
+          PY
           KEYSTORE="$RUNNER_TEMP/internet-browser-release.p12"
-          if [ ! -s "$KEYSTORE" ]; then
-            echo "::error title=Android keystore::Decoded keystore file is missing or empty."
-            exit 1
-          fi
-          if ! keytool -list -storetype PKCS12 \
-            -keystore "$KEYSTORE" \
-            -storepass:env ANDROID_KEYSTORE_PASSWORD >/dev/null 2>&1; then
-            echo "::error title=Android keystore password::Unable to open PKCS12 with ANDROID_KEYSTORE_PASSWORD. Verify the original .p12, Base64 secret and store password."
-            exit 1
-          fi
-          if ! keytool -list -storetype PKCS12 \
-            -keystore "$KEYSTORE" \
-            -storepass:env ANDROID_KEYSTORE_PASSWORD \
-            -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
-            echo "::error title=Android key alias::ANDROID_KEY_ALIAS does not match an alias in the PKCS12 keystore. Check the original keystore's alias locally and update the repository secret."
-            exit 1
-          fi
-          if ! keytool -list -storetype PKCS12 \
-            -keystore "$KEYSTORE" \
-            -storepass:env ANDROID_KEYSTORE_PASSWORD \
-            -alias "$ANDROID_KEY_ALIAS" | grep -q 'PrivateKeyEntry'; then
-            echo "::error title=Android key entry::The configured alias does not reference a signing private key."
-            exit 1
-          fi
-          echo "Android signing keystore, password and private-key alias verified."
-      - name: Build production-signed Android APK
+          test -s "$KEYSTORE"
+          keytool -list -storetype PKCS12 -keystore "$KEYSTORE" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" \
+            | grep -q 'PrivateKeyEntry'
+      - name: Sign exact Chromium build with v0.2.0 Android signing identity
         env:
-          ANDROID_RELEASE_KEYSTORE_FILE: ${{ runner.temp }}/internet-browser-release.p12
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          flutter build apk --release \
-            --build-name "$VERSION" --build-number "$VERSION_CODE"
-      - name: Verify APK signature and stage distribution
         shell: bash
         run: |
           set -euo pipefail
-          APK="build/app/outputs/flutter-apk/app-release.apk"
-          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)
-          test -n "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          read -r VERSION VERSION_CODE < <(
+            python3 -c 'from tool.release_metadata import parse_pubspec; from pathlib import Path; m=parse_pubspec(Path("pubspec.yaml").read_text()); print(m.version, m.version_code)'
+          )
+          SDK="$ANDROID_SDK_ROOT"
+          test -n "$SDK"
+          AAPT2=$(find "$SDK/build-tools" -type f -name aapt2 | sort -V | tail -n1)
+          APKSIGNER=$(find "$SDK/build-tools" -type f -name apksigner | sort -V | tail -n1)
+          ZIPALIGN=$(find "$SDK/build-tools" -type f -name zipalign | sort -V | tail -n1)
+          test -x "$AAPT2" && test -x "$APKSIGNER" && test -x "$ZIPALIGN"
+          SRC="build/android-native/native-chromium.apk"
+          python3 -m tool.chromium.titanium_product verify \
+            --apk "$SRC" --aapt2 "$AAPT2" \
+            --package io.github.sopo9880.internet_browser \
+            --version-code "$VERSION_CODE" --version-name "$VERSION"
           mkdir -p dist
-          cp "$APK" "dist/Internet-browser-Android-v$VERSION.apk"
-          test -s "dist/Internet-browser-Android-v$VERSION.apk"
+          "$ZIPALIGN" -f -p 4 "$SRC" "$RUNNER_TEMP/native-aligned.apk"
+          "$APKSIGNER" sign \
+            --ks "$RUNNER_TEMP/internet-browser-release.p12" --ks-type PKCS12 \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "dist/Internet-browser-Android-v$VERSION.apk" \
+            "$RUNNER_TEMP/native-aligned.apk"
+          SIGNED="dist/Internet-browser-Android-v$VERSION.apk"
+          "$APKSIGNER" verify --verbose "$SIGNED"
+          INFO=$("$APKSIGNER" verify --print-certs "$SIGNED")
+          # Cert hash observed in the v0.2.0 production release run.
+          EXPECTED_CERT="08116054e3a1de465da9357649c045fbb06e6d06f2c6108cda5e6dfd81d82e4a"
+          if ! printf '%s\n' "$INFO" | grep -Fqi "$EXPECTED_CERT"; then
+            echo "::error title=Android signing mismatch::Certificate differs from v0.2.0; existing user data must be protected."
+            exit 1
+          fi
+          python3 -m tool.chromium.titanium_product verify \
+            --apk "$SIGNED" --aapt2 "$AAPT2" \
+            --package io.github.sopo9880.internet_browser \
+            --version-code "$VERSION_CODE" --version-name "$VERSION"
+          echo "Native Chromium APK matches the original production Android signing certificate."
       - uses: actions/upload-artifact@v4
         with:
           name: release-signed-android-apk
           path: dist/Internet-browser-Android-v*.apk
           if-no-files-found: error
           retention-days: 14
-      - name: Delete temporary release key
+      - name: Remove production signing material
         if: always()
         shell: bash
-        run: rm -f "$RUNNER_TEMP/internet-browser-release.p12"
+        run: rm -f "$RUNNER_TEMP/internet-browser-release.p12" "$RUNNER_TEMP/native-aligned.apk"
 
   windows:
     needs: [prepare, quality]
@@ -224,7 +274,7 @@ jobs:
           retention-days: 14
 
   publish:
-    needs: [prepare, quality, android, windows]
+    needs: [prepare, quality, android, android_gate, android_sign, windows]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -260,9 +310,7 @@ jobs:
           APK="dist/Internet-browser-Android-v$VERSION.apk"
           EXE="dist/Internet-browser-Windows-Setup-v$VERSION.exe"
           RELEASE_NOTES="Windows installer and Android APK signed using the stored release key. Read docs/UPDATES.md before upgrading. SHA-256 checksums are attached."
-          if [ "$VERSION" = "0.2.0" ]; then
-            RELEASE_NOTES="$RELEASE_NOTES Android Chromium/AdBlock physical-device validation is deferred until AFTER publication. An APK build does not prove extension support. Follow docs/POST_RELEASE_ANDROID_VALIDATION.md."
-          fi
+          RELEASE_NOTES="$RELEASE_NOTES Android is built from native Titanium Chromium, not Flutter Android. Post-release device checklist: docs/POST_RELEASE_ANDROID_VALIDATION.md. Chromium license/source: docs/CHROMIUM_NATIVE_BUILD.md."
           gh release create "$TAG" \
             "$APK" "$EXE" "dist/SHA256SUMS.txt" \
             --repo "$GITHUB_REPOSITORY" \
