@@ -16,6 +16,7 @@ import 'address_parser.dart';
 import 'download_manager.dart';
 import 'dpi_proxy.dart';
 import 'dpi_options.dart';
+import 'dpi_preset_picker.dart';
 import 'offline_video_player.dart';
 import 'video_library.dart';
 import 'video_metadata.dart';
@@ -884,30 +885,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    DropdownButtonFormField<DpiPreset>(
-                      initialValue: editing.preset,
-                      decoration: const InputDecoration(
-                        labelText: '우회 프리셋',
-                      ),
-                      items: [
-                        for (final preset in DpiPreset.values)
-                          DropdownMenuItem(
-                            value: preset,
-                            child: Text(DpiOptions.presetNames[preset]!),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          update(() =>
-                              editing = editing.copyWith(preset: value));
-                        }
-                      },
+                    DpiPresetPicker(
+                      options: editing,
+                      windows: !_usesChromium,
+                      onChanged: (value) => update(() =>
+                          editing = editing.copyWith(preset: value)),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
-                      '프리셋은 Windows·Android 플랫폼별 적절한 인자를 '
-                      '선택합니다. 사용자 지정 시 각 옵션을 개별 설정합니다.',
-                    ),
                     if (editing.preset == DpiPreset.custom) ...[
                       SwitchListTile(
                         title: const Text('Split · 요청 분할'),
@@ -1126,9 +1110,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
                       }
                     },
                   ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: DpiPresetPicker(
+                      options: _dpiOptions,
+                      windows: !_usesChromium,
+                      onChanged: (preset) async {
+                        final prefs = _prefs;
+                        if (prefs == null) return;
+                        final selected = _dpiOptions.copyWith(preset: preset);
+                        update(() => _dpiOptions = selected);
+                        try {
+                          await selected.save(prefs);
+                          if (mounted) {
+                            _message(_usesChromium
+                                ? '프리셋 저장됨 · Android Chromium 네트워크 연결은 미완료입니다.'
+                                : '프리셋 저장됨 · Windows 앱 재시작 후 적용됩니다.');
+                          }
+                        } catch (error) {
+                          if (mounted) _message('프리셋 저장 실패: $error');
+                        }
+                      },
+                    ),
+                  ),
                   ListTile(
                     leading: const Icon(Icons.tune),
-                    title: const Text('DPI 우회 인자 및 프리셋'),
+                    title: const Text('고급 DPI 설정 및 인자 직접 조정'),
                     subtitle: Text(
                       DpiOptions.presetNames[_dpiOptions.preset] ??
                           '기본 (권장)',
@@ -1482,9 +1489,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                '현재 개발 빌드에는 확장 프로그램을 실행하는 Chromium '
-                '네이티브 엔진이 포함되지 않았습니다. WebView로 자동 대체하지 '
-                '않으며 AdBlock 호환성 검증 전에는 릴리스하지 않습니다.',
+                '현재 Android 설치본에는 웹페이지를 실행할 Chromium 네이티브 엔진이 '
+                '연결되지 않았습니다. 따라서 웹 탐색과 Chrome 확장 프로그램은 '
+                '사용할 수 없습니다. 기존 데이터를 삭제하지 마세요. '
+                'v0.2.1 엔진 통합을 진행 중입니다.',
                 textAlign: TextAlign.center,
               ),
               TextButton(
