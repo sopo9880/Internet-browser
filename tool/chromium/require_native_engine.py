@@ -1,95 +1,135 @@
 #!/usr/bin/env python3
-"""v0.2.1 gate: a compiled Flutter shell is not a usable Chromium browser.
+"""Fail-closed GATE for the real Titanium-native Android Chromium APK.
 
-A native Chromium AAR must be linked into the Android app and verified by
-automated in-app navigation, extensions and DPI integration tests. This script
-does not build the currently missing runtime or fabricate acceptance proof.
-Device-only acceptance is post-release, per project policy.
+No fake Flutter AAR and no separately signed Chromium "research" APK count
+as a release. The native candidate and its pinned source/provenance must
+match exactly, and independent automated Android functional evidence is
+required. No such evidence is produced yet: CI must NOT pass in its absence.
+Phone-only acceptance is still post-release, not a substitute for CI tests.
 """
 from __future__ import annotations
 
+import argparse
+from hashlib import sha256
 import json
-import os
 from pathlib import Path
 import re
 import sys
 
-from tool.chromium.verify_runtime import verify_aar
+from tool.chromium.titanium_pin import (
+    CHROMIUM_VERSION, PRODUCT_PACKAGE, REQUIRED_ADBLOCK_ID,
+    SOURCE_REPO, SOURCE_SHA, VANADIUM_SHA,
+)
 
 REQUIRED_AUTOMATED_CHECKS = (
-    "native_engine_initialized",
+    "native_browser_launch",
     "in_app_https_navigation",
     "tab_back_forward",
-    "extension_host_initialized",
-    "byedpi_route_connected",
-    "offline_media_player_available",
-    "existing_settings_retained",
+    "adblock_mv3_service_worker",
+    "adblock_network_request_blocked",
+    "byedpi_chromium_route",
+    "offline_video_playback",
+    "existing_library_migration",
+    "android_settings_and_samsung_security_guide",
 )
+
+PROVENANCE_KIND = "CHROMIUM_NATIVE_PRODUCT_CANDIDATE_NOT_RELEASE"
+
+
+def _read_json(path: str | None, label: str, errors: list[str]) -> dict:
+    if not path or not Path(path).is_file():
+        errors.append(f"Missing {label}. Real native Chromium compilation and CI integration tests required.")
+        return {}
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError) as exc:
+        errors.append(f"Invalid {label}: {exc}")
+        return {}
+    if not isinstance(data, dict):
+        errors.append(f"{label} must be a JSON object")
+        return {}
+    return data
 
 
 def readiness_errors(
-    aar_path: str | None,
-    aar_digest: str | None,
-    report_path: str | None,
+    apk: str | None,
+    provenance: str | None,
+    smoke_report: str | None,
+    version: str,
+    version_code: int,
+    integration_commit: str = "",
 ) -> list[str]:
     errors: list[str] = []
-    if not aar_path or not aar_digest:
-        errors.append(
-            "Missing real EMBEDDED Chromium AAR and matching SHA-256. "
-            "The standalone Titanium research APK cannot be embedded as an AAR."
-        )
+    digest: str | None = None
+    if not apk or not Path(apk).is_file() or Path(apk).stat().st_size == 0:
+        errors.append("Missing actual Titanium-native Chromium product APK. Flutter APK is not acceptable.")
     else:
-        try:
-            verify_aar(Path(aar_path), aar_digest)
-        except (ValueError, FileNotFoundError, OSError) as exc:
-            errors.append(f"Invalid Chromium AAR: {exc}")
+        digest = sha256(Path(apk).read_bytes()).hexdigest()
 
-    if not report_path or not Path(report_path).is_file():
-        errors.append(
-            "No trusted CI-generated Android integration smoke report. "
-            "An APK build does not prove Chromium browsing."
-        )
-        return errors
-    try:
-        report = json.loads(Path(report_path).read_text(encoding="utf-8"))
-    except (ValueError, UnicodeError, OSError) as exc:
-        errors.append(f"Invalid Chromium integration report: {exc}")
-        return errors
-    if not isinstance(report, dict):
-        return errors + ["The integration report must be a JSON object"]
-    if report.get("app_version") != "0.2.1":
-        errors.append("Integration report must target v0.2.1")
-    if report.get("engine") != "android-chromium":
-        errors.append("Real native Chromium engine not identified")
-    if report.get("test_environment") != "android-ci-emulator":
-        errors.append("Android CI emulator integration test required")
-    if report.get("aar_sha256") != aar_digest:
-        errors.append("Smoke report AAR digest does not match the supplied engine")
-    if not re.fullmatch(r"[a-f0-9]{64}", str(report.get("apk_sha256", ""))):
-        errors.append("CI smoke report does not contain a valid APK SHA-256")
-    checks = report.get("checks")
-    for check in REQUIRED_AUTOMATED_CHECKS:
-        if not isinstance(checks, dict) or checks.get(check) is not True:
-            errors.append(f"Missing passing automated integration check: {check}")
+    report = _read_json(provenance, "pinned native Chromium provenance", errors)
+    expected = {
+        "kind": PROVENANCE_KIND,
+        "engine_source": SOURCE_REPO,
+        "engine_source_commit": SOURCE_SHA,
+        "vanadium_source_commit": VANADIUM_SHA,
+        "chromium_version_reference": CHROMIUM_VERSION,
+        "candidate_android_package": PRODUCT_PACKAGE,
+        "production_android_package_id": PRODUCT_PACKAGE,
+        "production_id_matched": True,
+        "built_as_chromium_android_application": True,
+        "disposable_test_signer_not_upgrade_compatible": True,
+        "app_version": version,
+        "android_version_code": version_code,
+        "required_adblock_id": REQUIRED_ADBLOCK_ID,
+    }
+    for key, value in expected.items():
+        if report.get(key) != value:
+            errors.append(f"Native Chromium provenance mismatch: {key}")
+    if digest and report.get("apk_sha256") != digest:
+        errors.append("Native Chromium binary does not match its source provenance SHA-256")
+    if integration_commit and report.get("integration_commit") != integration_commit:
+        errors.append("Native Chromium build is from a different GitHub commit")
+
+    # The report MUST be produced by an actual automated emulator / device
+    # instrumentation job against this exact APK. Never author canned pass JSON.
+    smoke = _read_json(smoke_report, "real Android Chromium CI smoke report", errors)
+    if smoke:
+        if smoke.get("test_environment") != "android-ci-emulator":
+            errors.append("Chrome smoke evidence must originate from Android CI emulator")
+        if digest and smoke.get("apk_sha256") != digest:
+            errors.append("Android smoke report tested a different APK")
+        if integration_commit and smoke.get("integration_commit") != integration_commit:
+            errors.append("Android smoke report targeted the wrong commit")
+        checks = smoke.get("checks")
+        for check in REQUIRED_AUTOMATED_CHECKS:
+            if not isinstance(checks, dict) or checks.get(check) is not True:
+                errors.append(f"Native Chromium integration incomplete: {check}")
     return errors
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--apk", required=True)
+    parser.add_argument("--provenance", required=True)
+    parser.add_argument("--smoke-report", required=True)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--version-code", required=True, type=int)
+    parser.add_argument("--integration-commit", default="")
+    args = parser.parse_args()
+    if not re.fullmatch(r"0\.\d+\.\d+", args.version):
+        parser.error("Only v0.x release versions are supported")
+    if args.version_code <= 0:
+        parser.error("Invalid Android versionCode")
     errors = readiness_errors(
-        os.getenv("BROWSER_ANDROID_CHROMIUM_AAR"),
-        os.getenv("BROWSER_ANDROID_CHROMIUM_AAR_SHA256"),
-        os.getenv("BROWSER_CHROMIUM_CI_SMOKE_REPORT"),
+        args.apk, args.provenance, args.smoke_report,
+        args.version, args.version_code, args.integration_commit,
     )
     if errors:
         for error in errors:
-            print(f"::error title=v0.2.1 native Chromium blocker::{error}")
+            print(f"::error title=Native Chromium v0.x release blocker::{error}")
         return 1
-    print(
-        "Engine package and claimed integration report validated structurally. "
-        "The report MUST come from trusted instrumentation against the APK "
-        "with this exact engine linked; document that CI provenance before "
-        "treating the gate as sufficient. Physical-device QA is post-release."
-    )
+    print("Native Chromium provenance and independent automated integration evidence passed.")
+    print("Physical-device acceptance remains after release.")
     return 0
 
 
