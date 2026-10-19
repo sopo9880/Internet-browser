@@ -21,7 +21,6 @@ jobs:
     env:
       CHROMIUM_REVISION: ${{ inputs.chromium_revision }}
       CHROMIUM_CPU: ${{ inputs.cpu }}
-      CHROMIUM_WORKSPACE: ${{ runner.temp }}/internet-browser-chromium
     steps:
       - uses: actions/checkout@v4
       - name: Validate Chromium bootstrap
@@ -29,6 +28,8 @@ jobs:
           python3 -m unittest discover -s tool/tests -p test_chromium_bootstrap.py -v
           bash -n tool/chromium/build_android.sh
       - name: Build stock upstream Chromium Android baseline - NOT AdBlock
+        env:
+          CHROMIUM_WORKSPACE: ${{ runner.temp }}/internet-browser-chromium
         run: bash tool/chromium/build_android.sh
       - uses: actions/upload-artifact@v4
         with:
