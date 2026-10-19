@@ -92,3 +92,18 @@ was incorrectly treated as a completed product.
 - Only after feature implementation plus automatic integration checks pass
   can a verified PR be merged and v0.2.1 released. Actual phone testing
   remains after release, as requested.
+
+
+## v0.2.1 native pipeline integration (October 19, 2026)
+
+The correct product architecture is now **Windows Flutter/WebView2** plus
+**Android Titanium Chromium native application**. Both are jobs inside
+one PR CI and one release workflow; Android Flutter APKs are no longer built
+as CI/release products. This is a source/build routing change, NOT a claim
+that the resulting native Android experience is functionally complete.
+
+See [ANDROID_NATIVE_ARCHITECTURE.md](ANDROID_NATIVE_ARCHITECTURE.md) for
+exact job dependencies, production-signing isolation, update metadata
+and pending feature migration. No production Android release before
+native integration, AdBlock/ByeDPI/media/data-migration smoke and licensing
+are complete. A dedicated Chromium build runner is not yet confirmed.

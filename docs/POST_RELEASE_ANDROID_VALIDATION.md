@@ -62,3 +62,20 @@ Keep the released version and its checksums immutable. If the device test
 finds defects, fix them in a new PR and publish a new 0.x patch release.
 Do not announce Chromium/AdBlock compatibility as proven until device
 validation and actual native-engine implementation are complete.
+
+
+## v0.2.1 native Chromium upgrade-specific checks
+
+When (and ONLY when) the new Titanium-native Android APK is functionally
+complete and officially released, verify Android upgrade from the existing
+v0.2.0 Flutter-signed installation IN PLACE without uninstalling. The
+production Android signing certificate SHA256 must match v0.2.0 and
+Android versionCode must increase (expected 2,001,001 for v0.2.1+1).
+Ensure the old private Flutter settings and user library persist or are
+migrated correctly into Titanium native storage. Test Chromium navigation,
+Chrome Web Store AdBlock, MV3 request filtering, ByeDPI and offline media.
+Never treat normal APK compilation as proof of these features.
+
+The native CI product candidate is signed with a disposable key, so it is
+NOT a supported in-place update over v0.2.0. Use it only for isolated test
+installations, not production devices. See ANDROID_NATIVE_ARCHITECTURE.md.

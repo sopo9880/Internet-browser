@@ -112,17 +112,28 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertIn("apksigner", release)
 
 
-    def test_v021_requires_real_native_chromium_before_release(self):
+    def test_v021_uses_one_native_android_and_windows_ci_pipeline(self):
         root = Path(__file__).resolve().parents[2]
         ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         release = (root / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn("android_chromium_runtime_gate:", ci)
+        self.assertIn("name: android-titanium-native-candidate", ci)
+        self.assertIn("tool/chromium/build_titanium_prototype.sh", ci)
+        self.assertIn("tool/chromium/build_titanium_prototype.sh", release)
         self.assertIn("python3 -m tool.chromium.require_native_engine", ci)
         self.assertIn("python3 -m tool.chromium.require_native_engine", release)
-        self.assertIn("steps.version.outputs.version == '0.2.1'", release)
-        self.assertIn("needs: [prepare, quality, android, windows]", release)
+        self.assertIn("android_gate:", release)
+        self.assertIn("android_sign:", release)
+        self.assertIn("needs: [prepare, quality, android, android_gate, android_sign, windows]", release)
+        self.assertIn("08116054e3a1de465da9357649c045fbb06e6d06f2c6108cda5e6dfd81d82e4a", release)
+        for workflow in (ci, release):
+            self.assertIn("runs-on: [self-hosted, linux, x64, chromium-large]", workflow)
+            self.assertNotIn("flutter build apk", workflow)
+        self.assertFalse(
+            (root / ".github/workflows/chromium-extension-prototype.yml").exists()
+        )
 
     def test_device_acceptance_is_post_release_not_a_required_gate(self):
         root = Path(__file__).resolve().parents[2]
@@ -139,7 +150,7 @@ class WorkflowSafetyTests(unittest.TestCase):
         # Pre-release safeguards stay in place: no secret in PR CI and
         # release publication still requires the signed platform builds.
         self.assertNotIn("${{ secrets.", ci)
-        self.assertIn("needs: [prepare, quality, android, windows]", release)
+        self.assertIn("needs: [prepare, quality, android, android_gate, android_sign, windows]", release)
         self.assertIn('"$APKSIGNER" verify', release)
 
 
