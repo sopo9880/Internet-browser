@@ -56,7 +56,7 @@ jobs:
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Android-v0.2.0
+          name: Browser-Android-v0.2.1
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
@@ -100,12 +100,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-v0.2.0
+          name: Browser-Windows-v0.2.1
           path: build/windows/x64/runner/Release/**
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-Setup-v0.2.0
+          name: Browser-Windows-Setup-v0.2.1
           path: dist/Internet-browser-Windows-Setup-v*.exe
           if-no-files-found: error
 
@@ -124,3 +124,12 @@ jobs:
           echo "Source pinned and prototype builder syntax checked."
           echo "Real Chromium engine compilation requires a separate 32GB/120GB runner."
           echo "AdBlock installation and in-app engine remain UNVERIFIED."
+
+  android_chromium_runtime_gate:
+    # v0.2.1 MUST NOT pass just because its non-functional shell compiles.
+    runs-on: ubuntu-24.04
+    needs: [quality, android]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require actual integrated Chromium and automated navigation proof
+        run: python3 -m tool.chromium.require_native_engine

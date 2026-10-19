@@ -29,6 +29,9 @@ jobs:
       - name: Validate 0.x version and calculate increasing Android versionCode
         id: version
         run: python3 tool/release_metadata.py
+      - name: Block v0.2.1 release without Chromium and automated smoke evidence
+        if: steps.version.outputs.version == '0.2.1'
+        run: python3 -m tool.chromium.require_native_engine
       - name: Skip a version already released
         id: existing
         env:

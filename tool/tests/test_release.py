@@ -112,6 +112,18 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertIn("apksigner", release)
 
 
+    def test_v021_requires_real_native_chromium_before_release(self):
+        root = Path(__file__).resolve().parents[2]
+        ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        release = (root / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("android_chromium_runtime_gate:", ci)
+        self.assertIn("python3 -m tool.chromium.require_native_engine", ci)
+        self.assertIn("python3 -m tool.chromium.require_native_engine", release)
+        self.assertIn("steps.version.outputs.version == '0.2.1'", release)
+        self.assertIn("needs: [prepare, quality, android, windows]", release)
+
     def test_device_acceptance_is_post_release_not_a_required_gate(self):
         root = Path(__file__).resolve().parents[2]
         ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")

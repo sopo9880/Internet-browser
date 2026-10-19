@@ -91,3 +91,15 @@ helper which can offer the official AdBlock store link on initial
 installation. See docs/CHROMIUM_NATIVE_BUILD.md for the limitations:
 this path has NOT been compiled or device-verified yet, and the
 research signing identity must be stabilized before production.
+
+## v0.2.1 development status (not a released Android fix)
+
+**Android v0.2.0 cannot browse pages.** It was published without a
+compiled embedded Chromium engine. Do not clear existing user data.
+
+The v0.2.1 development branch adds a readable ByeDPI preset dropdown,
+Samsung/Android security Settings navigation and an explicit native
+Chromium CI/release readiness gate. The engine and actual AdBlock support
+are NOT implemented yet. The required gate stays failing until real
+engine integration and automatic Android navigation/extension tests exist.
+Do not publish v0.2.1 solely because the Flutter APK compiles.
