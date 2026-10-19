@@ -135,6 +135,18 @@ class WorkflowSafetyTests(unittest.TestCase):
             (root / ".github/workflows/chromium-extension-prototype.yml").exists()
         )
 
+    def test_wsl_chromium_runner_is_resource_capped(self):
+        root = Path(__file__).resolve().parents[2]
+        builder = (root / "tool/chromium/build_titanium_prototype.sh").read_text()
+        self.assertIn("build_resources.py", builder)
+        self.assertIn('CHROMIUM_NINJA_JOBS', builder)
+        self.assertIn('CHROMIUM_SYNC_JOBS', builder)
+        for name in ("ci.yml", "release.yml"):
+            workflow = (root / ".github/workflows" / name).read_text()
+            self.assertIn("timeout-minutes: 1440", workflow)
+            self.assertIn("CHROMIUM_NINJA_JOBS: '3'", workflow)
+            self.assertIn("CHROMIUM_SYNC_JOBS: '2'", workflow)
+
     def test_device_acceptance_is_post_release_not_a_required_gate(self):
         root = Path(__file__).resolve().parents[2]
         ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")

@@ -192,3 +192,36 @@ existing development PR #4. Workflow:
 The job needs a connected `[self-hosted, linux, x64, chromium-large]`
 runner and can queue if none is available. A passing lightweight Flutter
 CI run is NOT proof that this real Chromium compilation succeeded.
+
+
+## 2026-10-19: 23 GiB RAM + 24 GiB swap WSL2 source-build mode
+
+This repository's one required PR CI (ci.yml) now owns the genuine
+Titanium-native Android compile. The older separate research PR workflow
+was removed. In v0.2.1, do NOT follow earlier instructions in this
+document about PR #3 or the now-deleted chromium-extension-prototype.yml.
+
+On the user's dedicated Ubuntu 24.04 WSL2 distribution, memory visible
+inside Linux is ~23 GiB, swap is 24 GiB, CPUs visible are 12 and the
+Ubuntu ext4 filesystem has ~954 GiB free. A new
+tool/chromium/build_resources.py preflight admits this configuration
+only when enough physical available RAM, swap, combined capacity and
+disk are present; the earlier unconditional 30,000,000 KiB RAM gate
+is removed. A default 3-worker autoninja / 2-worker gclient sync
+configuration is patched into the exact, source-pinned upstream
+build.sh; if upstream commands change, patching fails closed.
+These limits trade compilation throughput for reduced OOM risk.
+A verified source-build success is still pending.
+
+Set CHROMIUM_NINJA_JOBS=2 to reduce memory pressure further if needed,
+or CHROMIUM_SYNC_JOBS=1 to reduce source download concurrency.
+Low-RAM preflight deliberately rejects values over 3 (ninja) / 2 (sync).
+The dedicated GitHub self-hosted Android build job has a 24-hour limit.
+NEVER change the Android runtime smoke gate merely to make CI green.
+
+This pinned upstream builder installs Debian/Ubuntu packages via sudo.
+A normal GitHub runner is noninteractive; password-protected sudo may
+block compilation. Plan privileged dependency installation inside the
+dedicated WSL distribution before connecting the runner, and use only
+trusted code. WSL2 and disabled Windows drive mounts are not a complete
+security boundary. Do NOT place production signing keys in this runner.

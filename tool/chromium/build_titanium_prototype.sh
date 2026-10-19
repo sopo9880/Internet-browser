@@ -46,18 +46,14 @@ if [ -e "$WORKSPACE" ]; then
   exit 2
 fi
 
+# WSL2 24GB RAM + 24GB swap: 3 compile workers, 2 source-sync workers.
+# Fail if swap, available RAM or Linux workspace space is insufficient.
+CHROMIUM_NINJA_JOBS="${CHROMIUM_NINJA_JOBS:-3}"
+CHROMIUM_SYNC_JOBS="${CHROMIUM_SYNC_JOBS:-2}"
 python3 "$SCRIPT_DIR/titanium_pin.py"
 mkdir -p "$WORKSPACE"
-AVAILABLE="$(df -Pk "$WORKSPACE" | awk 'END {print $4}')"
-if [ "$AVAILABLE" -lt 120000000 ]; then
-  echo "Chromium engine source build requires ~120 GB free disk" >&2
-  exit 2
-fi
-RAM_KIB="$(awk '/MemTotal:/ {print $2}' /proc/meminfo)"
-if [ "$RAM_KIB" -lt 30000000 ]; then
-  echo "Chromium engine builder needs at least 32 GB RAM" >&2
-  exit 2
-fi
+python3 "$SCRIPT_DIR/build_resources.py" --workspace "$WORKSPACE" \
+  --ninja-jobs "$CHROMIUM_NINJA_JOBS" --sync-jobs "$CHROMIUM_SYNC_JOBS"
 
 git clone --no-checkout https://github.com/jqssun/android-titanium-browser.git "$WORKSPACE/titanium"
 git -C "$WORKSPACE/titanium" fetch --depth=1 origin "$SOURCE_SHA"
@@ -87,7 +83,9 @@ fi
 python3 "$SCRIPT_DIR/titanium_product.py" configure \
   --args "$WORKSPACE/titanium/args.gn" \
   --build "$WORKSPACE/titanium/build.sh" \
-  --package "$APP_PACKAGE" "${VERSION_FLAGS[@]}"
+  --package "$APP_PACKAGE" \
+  --ninja-jobs "$CHROMIUM_NINJA_JOBS" --sync-jobs "$CHROMIUM_SYNC_JOBS" \
+  "${VERSION_FLAGS[@]}"
 
 # Ephemeral signing keys. This is NOT the Internet-browser production key.
 # Avoid loading any repository signing secret into third-party Chromium builds.

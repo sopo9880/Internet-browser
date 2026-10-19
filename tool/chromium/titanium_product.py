@@ -39,6 +39,8 @@ def prepare_source(
     *,
     version_code: int | None = None,
     version_name: str | None = None,
+    ninja_jobs: int | None = None,
+    sync_jobs: int | None = None,
 ) -> tuple[str, str]:
     if package not in ALLOWED_PACKAGES:
         raise ValueError("Only explicit research/product Android package IDs are allowed")
@@ -65,8 +67,23 @@ def prepare_source(
     args = replace_exact(args, SOURCE_CPU, 'target_cpu = "arm64"')
     build = replace_exact(build, ARM32_TARGET, "# ARM64-only native Chromium candidate\n")
     build = replace_exact(build, ARM32_SIGN, "")
-    if "autoninja -C out/Default chrome_public_apk chrome_public_bundle" not in build:
+    arm64_target = "autoninja -C out/Default chrome_public_apk chrome_public_bundle"
+    if build.count(arm64_target) != 1:
         raise ValueError("Pinned upstream ARM64 Chromium APK build target missing")
+    if ninja_jobs is not None:
+        if not isinstance(ninja_jobs, int) or not 1 <= ninja_jobs <= 8:
+            raise ValueError("Chromium ninja job count must be 1..8")
+        build = replace_exact(
+            build, arm64_target,
+            f"autoninja -j {ninja_jobs} -C out/Default chrome_public_apk chrome_public_bundle",
+        )
+    if sync_jobs is not None:
+        if not isinstance(sync_jobs, int) or not 1 <= sync_jobs <= 4:
+            raise ValueError("Chromium gclient job count must be 1..4")
+        build = replace_exact(
+            build, "gclient sync -D --no-history --nohooks",
+            f"gclient sync -j {sync_jobs} -D --no-history --nohooks",
+        )
     return args, build
 
 
@@ -124,6 +141,8 @@ def main() -> None:
     config.add_argument("--package", required=True)
     config.add_argument("--version-code", type=int)
     config.add_argument("--version-name")
+    config.add_argument("--ninja-jobs", type=int)
+    config.add_argument("--sync-jobs", type=int)
     verify = sub.add_parser("verify")
     verify.add_argument("--apk", type=Path, required=True)
     verify.add_argument("--aapt2", type=Path, required=True)
@@ -137,6 +156,7 @@ def main() -> None:
         patched_args, patched_build = prepare_source(
             before_args, before_build, options.package,
             version_code=options.version_code, version_name=options.version_name,
+            ninja_jobs=options.ninja_jobs, sync_jobs=options.sync_jobs,
         )
         options.args.write_text(patched_args, encoding="utf-8")
         options.build.write_text(patched_build, encoding="utf-8")

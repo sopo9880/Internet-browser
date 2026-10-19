@@ -32,7 +32,10 @@ jobs:
     # Safe disposable isolated runner, no production signing keys on PRs.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, chromium-large]
-    timeout-minutes: 360
+    timeout-minutes: 1440
+    env:
+      CHROMIUM_NINJA_JOBS: '3'
+      CHROMIUM_SYNC_JOBS: '2'
     needs: [quality, chromium_extension_source_pin]
     steps:
       - uses: actions/checkout@v4

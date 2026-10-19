@@ -64,8 +64,12 @@ PR #4. Push to main then triggers ONE signed release workflow:
 ### Blockers before v0.2.1 release
 
 1. **Runner:** register an isolated Linux x86_64 runner labeled
-   `self-hosted`, `linux`, `x64`, `chromium-large` with >=32 GB RAM
-   and >=120 GB free disk. Native Chromium source build remains queued
+   `self-hosted`, `linux`, `x64`, `chromium-large` with >=20 GiB RAM,
+   >=16 GiB swap, >=40 GiB combined memory/swap, >=120 GB free Linux
+   disk, and >=12 GiB available RAM. On the personal Windows 11 WSL2
+   Ubuntu-24.04 builder: 23 GiB RAM, 24 GiB swap, 12 visible logical CPUs,
+   954 GiB disk free; Chromium ninja -j3, gclient sync -j2. A clean
+   Chromium build is NOT yet confirmed. Native Chromium source build remains queued
    without hardware, not a "completed Chromium integration".
 2. **Android features:** migrate existing Flutter features to native
    Titanium UI/network layer. Android ByeDPI proxy configuration currently
@@ -86,3 +90,36 @@ PR #4. Push to main then triggers ONE signed release workflow:
 The runtime gate is deliberately RED until the remaining implementation is
 real. Never weaken this gate to turn CI green. Do not merge the Draft PR
 or release v0.2.1 while the native pipeline has not passed.
+
+
+### Ubuntu 24.04 WSL2 runner preparation (personal PC, not connected yet)
+
+- WSL2 memory: 24GB, swap: 24GB, processors: 12 in Windows
+  .wslconfig; verify from Ubuntu with free -h, nproc, df -h /.
+- Ubuntu-24.04 /etc/wsl.conf keeps systemd enabled and disables
+  Windows drive automount and Windows process interop. WSL2 is NOT a
+  security boundary; avoid sensitive host credentials on this build OS.
+- The source builder checks /proc/meminfo and *real free Linux* storage,
+  then patches the pinned Titanium build.sh with gclient sync -j 2
+  and autoninja -j 3. On low physical RAM, it refuses insufficient swap
+  or unsafe parallelism; success still depends on real compiler demands.
+- For the **first build**, the GitHub Android CI job has 24-hour timeout.
+  Keep Windows powered and avoid WSL shutdown while it runs.
+- Install the official Linux x64 GitHub Actions runner only from the exact
+  repository Settings > Actions > Runners > New self-hosted runner instructions.
+  The runner must register labels [self-hosted, linux, x64, chromium-large].
+  Registration tokens are short-lived SECRET credentials; never paste them
+  into ChatGPT, logs or repository code. Do not run the runner as Windows
+  administrator or put production Android signing secrets on WSL.
+- Only same-repository PRs can invoke this build job (not forks).
+  Nonetheless, runner uses public-repo source and pinned third-party
+  build.sh, which executes sudo apt-get and build/install-build-deps.sh.
+  Configure privileged build prerequisites only inside this dedicated
+  disposable development environment; do NOT grant system-wide
+  passwordless sudo on your main Windows workstation. If unattended
+  sudo is not available, the upstream script may fail until a safe
+  dedicated provisioning plan is established.
+- There is an older queued "Android Chromium Titanium native source build"
+  run from the previously removed workflow. Cancel the obsolete run in
+  GitHub Actions before connecting a scarce runner, so it will not consume
+  hours of compile time ahead of the current PR CI.

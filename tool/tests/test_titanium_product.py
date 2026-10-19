@@ -43,6 +43,39 @@ class TitaniumNativeProductTests(unittest.TestCase):
                         version_code=code, version_name=name,
                     )
 
+    def test_23gib_wsl_build_limits_upstream_autoninja_and_sync(self):
+        build_with_gclient = (
+            "gclient sync -D --no-history --nohooks\n" + BUILD
+        )
+        _, patched = prepare_source(
+            ARGS, build_with_gclient, PRODUCT_PACKAGE,
+            ninja_jobs=3, sync_jobs=2,
+        )
+        self.assertIn(
+            "autoninja -j 3 -C out/Default chrome_public_apk chrome_public_bundle",
+            patched,
+        )
+        self.assertIn("gclient sync -j 2 -D --no-history --nohooks", patched)
+        self.assertNotIn("autoninja -C out/Default", patched)
+
+    def test_unexpected_upstream_sync_template_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "template changed"):
+            prepare_source(
+                ARGS, BUILD, PRODUCT_PACKAGE,
+                ninja_jobs=3, sync_jobs=2,
+            )
+
+    def test_invalid_parallelism_must_fail(self):
+        build_with_gclient = (
+            "gclient sync -D --no-history --nohooks\n" + BUILD
+        )
+        for ninja, sync in [(0, 2), (9, 2), (3, 0), (3, 5)]:
+            with self.subTest(ninja=ninja, sync=sync), self.assertRaises(ValueError):
+                prepare_source(
+                    ARGS, build_with_gclient, PRODUCT_PACKAGE,
+                    ninja_jobs=ninja, sync_jobs=sync,
+                )
+
     def test_keeps_separate_research_variant(self):
         gn, _ = prepare_source(ARGS, BUILD, RESEARCH_PACKAGE)
         self.assertIn(RESEARCH_PACKAGE, gn)
