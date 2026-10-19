@@ -55,3 +55,12 @@ review a new source artifact as a separate explicit change; do not silently
 fall back to a different APK or rerun the multi-hour Chromium build.
 Physical-device validation remains post-release for the actual completed
 product; this signing-only workflow does not claim that testing happened.
+
+## apksigner version compatibility
+
+Android build-tools 37 reports APK certificate fingerprints as `V2 Signer:`
+or `V3.0 Signer:` rather than the older `Signer #1` prefix. Both styles
+are accepted only when Android apksigner verifies **one signer** and all
+scheme-reported SHA-256 certificate fingerprints agree. This does not
+relax the existing v0.2.0 production key fingerprint check. No source APK
+or Chromium compilation needs to change.

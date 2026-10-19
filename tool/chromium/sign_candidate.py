@@ -131,6 +131,35 @@ def _output(*args: str) -> str:
     return subprocess.run(args, text=True, capture_output=True, check=True).stdout
 
 
+def parse_verified_certificate_sha256(certificates: str) -> str:
+    """Read the SINGLE verified APK signer from old and new Android build-tools.
+
+    Build-tools through 36 use "Signer #1 certificate SHA-256 digest";
+    newer apksigner versions prefix it with a scheme, e.g.
+    "V2 Signer: certificate SHA-256 digest" or "V3.0 Signer: ...".
+    An APK verified across multiple signing schemes may report the SAME
+    certificate repeatedly. Require one signer AND exactly one distinct
+    certificate digest; never silently select the first of different keys.
+    """
+    counts = re.findall(r"^Number of signers:\s*(\d+)\s*$",
+                        certificates, flags=re.MULTILINE)
+    _require(counts == ["1"], "APK must have exactly one verified signer")
+    certificate_lines = re.findall(
+        r"^(?:Signer #\d+|Signer \(minSdkVersion=\d+,\s*maxSdkVersion=\d+\)"
+        r"|V\d+(?:\.\d+)? Signer(?: #\d+)?)"
+        r":?\s+certificate SHA-256 digest:\s*([0-9a-f]{64})\s*$",
+        certificates, flags=re.MULTILINE | re.IGNORECASE,
+    )
+    _require(bool(certificate_lines), "APK verified signer certificate digest missing")
+    # Both legacy multi-signers and future scheme-indexed multi-signers fail.
+    _require(re.search(r"\bSigner #(?:[2-9]|\d{2,})\b", certificates) is None,
+             "APK must have exactly one verified signer")
+    digests = {digest.lower() for digest in certificate_lines}
+    _require(len(digests) == 1,
+             "APK signing schemes have inconsistent certificate identities")
+    return digests.pop()
+
+
 def verify_apk_identity(apk: Path, aapt2: Path, apksigner: Path) -> str:
     package = _output(str(aapt2), "dump", "packagename", str(apk)).strip()
     _require(package == APP_PACKAGE, "Native APK package name differs from existing app")
@@ -140,13 +169,7 @@ def verify_apk_identity(apk: Path, aapt2: Path, apksigner: Path) -> str:
     _require(f"versionCode='{VERSION_CODE}'" in info, "Native manifest versionCode mismatch")
     _require(f"versionName='{VERSION_NAME}'" in info, "Native manifest versionName mismatch")
     certificates = _output(str(apksigner), "verify", "--verbose", "--print-certs", str(apk))
-    match = re.search(
-        r"Signer #1 certificate SHA-256 digest:\s*([0-9a-f]{64})",
-        certificates, flags=re.IGNORECASE,
-    )
-    _require(match is not None and "Signer #2" not in certificates,
-             "APK must have one valid signing identity")
-    return match.group(1).lower()
+    return parse_verified_certificate_sha256(certificates)
 
 
 def verify_unsigned_candidate(apk: Path, provenance: Path, aapt2: Path, apksigner: Path) -> str:
