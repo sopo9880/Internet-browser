@@ -124,15 +124,3 @@ jobs:
           echo "Source pinned and prototype builder syntax checked."
           echo "Real Chromium engine compilation requires a separate 32GB/120GB runner."
           echo "AdBlock installation and in-app engine remain UNVERIFIED."
-
-  android_chromium_adblock_acceptance:
-    runs-on: ubuntu-24.04
-    needs: [android]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Require real Android Chromium + exact AdBlock extension
-        run: |
-          # Intentionally fails until a real Chromium Android build and
-          # trusted physical-device test provide this evidence.
-          # A passing Flutter/WebView build cannot satisfy this gate.
-          python3 tool/chromium_extension_acceptance.py

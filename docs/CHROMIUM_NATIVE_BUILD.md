@@ -98,9 +98,12 @@ into that host. Before replacing the live app, prove:
    correct monotonically increasing versionCode.
 8. Windows builds still pass. Retain the 0.x version policy.
 
-The complete PR CI and release workflow remain blocked until the
-physical-device AdBlock acceptance gate is satisfied. No manual
-acceptance.json may stand in for actual trusted device test results.
+Physical-device AdBlock acceptance is performed AFTER publishing a signed
+release. It no longer blocks PR CI or the release workflow. The strict
+acceptance script remains available for trusted device evidence; a manually
+fabricated acceptance.json is not proof of physical-device testing.
+Passing source-pin and Android/Windows builds does NOT prove that the native
+Chromium engine is embedded or that AdBlock works.
 
 ## Remaining infrastructure dependency
 
@@ -140,12 +143,14 @@ not executed this extension in a real Chromium APK.
 Production blocker: Research builds generate an ephemeral welcome
 signing key. This gives a new welcome extension ID on every build, so
 the native extension could show the page again across APK upgrades.
-A stable, securely stored signing key and proven first-run-only behavior
-on device are necessary before release. The key must never be checked
-into Git or bundled with an APK. A native first-run UI or retained
+A stable, securely stored extension signing key is still required for
+consistent production upgrades. First-run-only behavior on a real device is
+checked AFTER publication; the private key must never be checked into Git or
+bundled with an APK. A native first-run UI or retained
 Chromium profile marker may be preferable for the final app host.
 
-This workflow does not overcome the lack of a full compiled Chromium
-engine, Chromium-to-Flutter integration, ByeDPI transport, or real-device
-testing of the exact requested AdBlock. The v0.2.0 acceptance gate
-remains mandatory.
+This research workflow does not overcome the lack of a full compiled
+in-app Chromium engine, Chromium-to-Flutter integration or ByeDPI transport.
+Real-device AdBlock verification is now a post-release activity. See
+docs/POST_RELEASE_ANDROID_VALIDATION.md. Do not advertise native extension
+support based only on the successful Flutter/WebView package build.

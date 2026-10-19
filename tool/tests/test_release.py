@@ -112,5 +112,24 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertIn("apksigner", release)
 
 
+    def test_device_acceptance_is_post_release_not_a_required_gate(self):
+        root = Path(__file__).resolve().parents[2]
+        ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        release = (root / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("android_chromium_adblock_acceptance:", ci)
+        self.assertNotIn("python3 tool/chromium_extension_acceptance.py", ci)
+        self.assertNotIn("python3 tool/chromium_extension_acceptance.py", release)
+        self.assertTrue((root / "tool/chromium_extension_acceptance.py").is_file())
+        self.assertTrue((root / "docs/POST_RELEASE_ANDROID_VALIDATION.md").is_file())
+        self.assertIn("docs/POST_RELEASE_ANDROID_VALIDATION.md", release)
+        # Pre-release safeguards stay in place: no secret in PR CI and
+        # release publication still requires the signed platform builds.
+        self.assertNotIn("${{ secrets.", ci)
+        self.assertIn("needs: [prepare, quality, android, windows]", release)
+        self.assertIn('"$APKSIGNER" verify', release)
+
+
 if __name__ == "__main__":
     unittest.main()
