@@ -262,7 +262,7 @@ class _InstallerDownloadDialogState extends State<InstallerDownloadDialog> {
           TextButton.icon(
             onPressed: () async {
               final opened = await widget.service.openAndroidSecuritySettings();
-              if (!mounted) return;
+              if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(opened
