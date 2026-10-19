@@ -32,9 +32,34 @@ def replace_exact(source: str, before: str, after: str) -> str:
     return source.replace(before, after, 1)
 
 
-def prepare_source(args: str, build: str, package: str) -> tuple[str, str]:
+def prepare_source(
+    args: str,
+    build: str,
+    package: str,
+    *,
+    version_code: int | None = None,
+    version_name: str | None = None,
+) -> tuple[str, str]:
     if package not in ALLOWED_PACKAGES:
         raise ValueError("Only explicit research/product Android package IDs are allowed")
+    if package == PRODUCT_PACKAGE:
+        if (version_code is None) != (version_name is None):
+            raise ValueError("Chromium product versionCode/versionName must be paired")
+        if version_code is not None:
+            if not (2_000_002 <= version_code <= 2_100_000_000):
+                raise ValueError("Chromium versionCode must increase beyond v0.2.0")
+            if not re.fullmatch(r"0\.[0-9]+\.[0-9]+", version_name or ""):
+                raise ValueError("Production Chromium requires 0.x versionName")
+            # Chromium GN recognizes both overrides for chrome_public_apk.
+            # Without this, Chromium's upstream versionCode can break upgrades.
+            if "android_override_version_code" in args or "android_override_version_name" in args:
+                raise ValueError("Upstream version overrides unexpectedly present")
+            args += (
+                f'\nandroid_override_version_code = "{version_code}"\n'
+                f'android_override_version_name = "{version_name}"\n'
+            )
+    elif version_code is not None or version_name is not None:
+        raise ValueError("Research builds must not impersonate release metadata")
     args = replace_exact(args, SOURCE_PACKAGE,
                          f'chrome_public_manifest_package = "{package}"')
     args = replace_exact(args, SOURCE_CPU, 'target_cpu = "arm64"')
@@ -60,12 +85,34 @@ def read_native_package(apk: Path, aapt2: Path) -> str:
     return name
 
 
-def verify_native_apk(apk: Path, aapt2: Path, package: str) -> None:
+def verify_native_apk(
+    apk: Path,
+    aapt2: Path,
+    package: str,
+    *,
+    version_code: int | None = None,
+    version_name: str | None = None,
+) -> None:
     if package not in ALLOWED_PACKAGES:
         raise ValueError("Unapproved package ID")
     actual = read_native_package(apk, aapt2)
     if actual != package:
         raise ValueError(f"Chromium APK package mismatch: {actual} != {package}")
+    if version_code is not None or version_name is not None:
+        if version_code is None or not version_name:
+            raise ValueError("Version code and name must be supplied together")
+        output = subprocess.run(
+            [str(aapt2), "dump", "badging", str(apk)],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        manifest = next((line for line in output.splitlines()
+                         if line.startswith("package:")), "")
+        if (f"versionCode='{version_code}'" not in manifest or
+                f"versionName='{version_name}'" not in manifest):
+            raise ValueError(
+                "Native Chromium APK manifest version does not match requested "
+                f"versionCode={version_code} versionName={version_name}"
+            )
 
 
 def main() -> None:
@@ -75,22 +122,30 @@ def main() -> None:
     config.add_argument("--args", type=Path, required=True)
     config.add_argument("--build", type=Path, required=True)
     config.add_argument("--package", required=True)
+    config.add_argument("--version-code", type=int)
+    config.add_argument("--version-name")
     verify = sub.add_parser("verify")
     verify.add_argument("--apk", type=Path, required=True)
     verify.add_argument("--aapt2", type=Path, required=True)
     verify.add_argument("--package", required=True)
+    verify.add_argument("--version-code", type=int)
+    verify.add_argument("--version-name")
     options = parser.parse_args()
     if options.command == "configure":
         before_args = options.args.read_text(encoding="utf-8")
         before_build = options.build.read_text(encoding="utf-8")
         patched_args, patched_build = prepare_source(
             before_args, before_build, options.package,
+            version_code=options.version_code, version_name=options.version_name,
         )
         options.args.write_text(patched_args, encoding="utf-8")
         options.build.write_text(patched_build, encoding="utf-8")
         print(f"Configured pinned ARM64 Titanium Chromium for {options.package}")
     else:
-        verify_native_apk(options.apk, options.aapt2, options.package)
+        verify_native_apk(
+            options.apk, options.aapt2, options.package,
+            version_code=options.version_code, version_name=options.version_name,
+        )
         print(f"Verified REAL native Chromium APK package: {options.package}")
 
 

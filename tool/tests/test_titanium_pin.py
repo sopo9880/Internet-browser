@@ -34,10 +34,16 @@ class TitaniumSourcePinTests(unittest.TestCase):
             apk = Path(tmp) / "native-candidate.apk"
             apk.write_bytes(b"fixture only")
             report = Path(tmp) / "report.json"
-            pin.write_prototype_report(report, apk, pin.PRODUCT_PACKAGE)
+            pin.write_prototype_report(
+                report, apk, pin.PRODUCT_PACKAGE,
+                app_version="0.2.1", version_code=2001001,
+                integration_commit="e" * 40,
+            )
             data = json.loads(report.read_text(encoding="utf-8"))
             self.assertTrue(data["built_as_chromium_android_application"])
             self.assertTrue(data["production_id_matched"])
+            self.assertEqual(data["android_version_code"], 2001001)
+            self.assertEqual(data["app_version"], "0.2.1")
             self.assertTrue(data["disposable_test_signer_not_upgrade_compatible"])
             self.assertFalse(data["release_approved"])
             self.assertFalse(data["byedpi_media_migrated"])

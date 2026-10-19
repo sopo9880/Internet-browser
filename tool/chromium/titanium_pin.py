@@ -51,7 +51,9 @@ def verify_checkout(source: Path, head_sha: str, vanadium_sha: str) -> None:
 
 
 def write_prototype_report(
-    path: Path, apk: Path, package: str = PROTOTYPE_PACKAGE
+    path: Path, apk: Path, package: str = PROTOTYPE_PACKAGE,
+    *, app_version: str = "", version_code: int = 0,
+    integration_commit: str = "",
 ) -> None:
     validate_pins()
     if package not in (PROTOTYPE_PACKAGE, PRODUCT_PACKAGE):
@@ -69,6 +71,9 @@ def write_prototype_report(
         "candidate_android_package": package,
         "production_android_package_id": PRODUCT_PACKAGE,
         "production_id_matched": product,
+        "app_version": app_version,
+        "android_version_code": version_code,
+        "integration_commit": integration_commit,
         "engine_source": SOURCE_REPO,
         "engine_source_commit": SOURCE_SHA,
         "vanadium_source_commit": VANADIUM_SHA,
@@ -95,6 +100,9 @@ def main() -> None:
     p.add_argument("--vanadium-sha")
     p.add_argument("--apk", type=Path)
     p.add_argument("--package", default=PROTOTYPE_PACKAGE)
+    p.add_argument("--app-version", default="")
+    p.add_argument("--version-code", type=int, default=0)
+    p.add_argument("--integration-commit", default="")
     p.add_argument("--report", type=Path)
     args = p.parse_args()
     validate_pins()
@@ -105,7 +113,12 @@ def main() -> None:
     if args.apk:
         if not args.report:
             p.error("Compiled APK requires --report")
-        write_prototype_report(args.report, args.apk, args.package)
+        write_prototype_report(
+            args.report, args.apk, args.package,
+            app_version=args.app_version,
+            version_code=args.version_code,
+            integration_commit=args.integration_commit,
+        )
     print("Chromium 155 extension-engine source pin verified; no device success implied")
 
 

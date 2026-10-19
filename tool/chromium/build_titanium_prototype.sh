@@ -24,6 +24,8 @@ case "$FLAVOR" in
   product-candidate)
     APP_PACKAGE="io.github.sopo9880.internet_browser"
     OUTPUT_NAME="Internet-browser-Titanium-ARM64-PRODUCT-CANDIDATE-NOT-INSTALLABLE-UPGRADE.apk"
+    : "${BROWSER_NATIVE_VERSION_CODE:?Set native versionCode computed from pubspec}"
+    : "${BROWSER_NATIVE_VERSION:?Set native 0.x versionName computed from pubspec}"
     ;;
   *)
     echo "Unsupported Chromium build flavor: $FLAVOR" >&2; exit 2 ;;
@@ -78,10 +80,14 @@ python3 "$SCRIPT_DIR/pack_welcome_crx.py" \
 
 # Build a *real* native Chrome APK with the desired product package ID.
 # A compiled Chrome application is NOT an embeddable Flutter AndroidView AAR.
+VERSION_FLAGS=()
+if [ "$FLAVOR" = "product-candidate" ]; then
+  VERSION_FLAGS=(--version-code "$BROWSER_NATIVE_VERSION_CODE" --version-name "$BROWSER_NATIVE_VERSION")
+fi
 python3 "$SCRIPT_DIR/titanium_product.py" configure \
   --args "$WORKSPACE/titanium/args.gn" \
   --build "$WORKSPACE/titanium/build.sh" \
-  --package "$APP_PACKAGE"
+  --package "$APP_PACKAGE" "${VERSION_FLAGS[@]}"
 
 # Ephemeral signing keys. This is NOT the Internet-browser production key.
 # Avoid loading any repository signing secret into third-party Chromium builds.
@@ -111,13 +117,16 @@ AAPT2="$(find "$WORKSPACE/titanium/chromium/src/third_party/android_sdk/public/b
 APKSIGNER="$(find "$WORKSPACE/titanium/chromium/src/third_party/android_sdk/public/build-tools" -type f -name apksigner | sort -V | tail -n1)"
 test -n "$AAPT2" && test -n "$APKSIGNER"
 python3 "$SCRIPT_DIR/titanium_product.py" verify \
-  --apk "$APK" --aapt2 "$AAPT2" --package "$APP_PACKAGE"
+  --apk "$APK" --aapt2 "$AAPT2" --package "$APP_PACKAGE" "${VERSION_FLAGS[@]}"
 "$APKSIGNER" verify --verbose "$APK"
 mkdir -p "$WORKSPACE/output"
 cp "$APK" "$WORKSPACE/output/$OUTPUT_NAME"
 python3 "$SCRIPT_DIR/titanium_pin.py" \
   --apk "$WORKSPACE/output/$OUTPUT_NAME" \
   --package "$APP_PACKAGE" \
+  --app-version "${BROWSER_NATIVE_VERSION:-}" \
+  --version-code "${BROWSER_NATIVE_VERSION_CODE:-0}" \
+  --integration-commit "${GITHUB_SHA:-}" \
   --report "$WORKSPACE/output/provenance.json"
 echo "Compiled and checked native Chromium $FLAVOR APK, package=$APP_PACKAGE."
 echo "Signed with disposable key; NOT compatible as update over existing signed application."

@@ -25,6 +25,24 @@ class TitaniumNativeProductTests(unittest.TestCase):
         self.assertNotIn("armeabi-v7a", build)
         self.assertIn("autoninja -C out/Default chrome_public_apk chrome_public_bundle", build)
 
+    def test_native_product_uses_expected_upgrade_version_code(self):
+        gn, _ = prepare_source(
+            ARGS, BUILD, PRODUCT_PACKAGE,
+            version_code=2_001_001, version_name="0.2.1",
+        )
+        self.assertIn('android_override_version_code = "2001001"', gn)
+        self.assertIn('android_override_version_name = "0.2.1"', gn)
+
+    def test_wrong_product_versions_fail_closed(self):
+        for code, name in [(2_000_001, "0.2.1"), (2_001_001, "1.0.0"),
+                           (None, "0.2.1"), (2_001_001, None)]:
+            with self.subTest(code=code, name=name):
+                with self.assertRaises(ValueError):
+                    prepare_source(
+                        ARGS, BUILD, PRODUCT_PACKAGE,
+                        version_code=code, version_name=name,
+                    )
+
     def test_keeps_separate_research_variant(self):
         gn, _ = prepare_source(ARGS, BUILD, RESEARCH_PACKAGE)
         self.assertIn(RESEARCH_PACKAGE, gn)
@@ -53,6 +71,27 @@ class TitaniumNativeProductTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "package mismatch"):
                     verify_native_apk(apk, aapt, PRODUCT_PACKAGE)
                 verify_native_apk(apk, aapt, RESEARCH_PACKAGE)
+
+    def test_signed_apk_must_match_requested_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            apk = Path(tmp) / "native.apk"
+            apk.write_bytes(b"not a real APK, subprocess is mocked")
+            aapt = Path(tmp) / "aapt2"
+            aapt.touch()
+            with patch(
+                "tool.chromium.titanium_product.subprocess.run",
+                side_effect=[
+                    CompletedProcess([], 0, stdout=PRODUCT_PACKAGE + "\n"),
+                    CompletedProcess([], 0, stdout=(
+                        "package: name='io.github.sopo9880.internet_browser' "
+                        "versionCode='2001001' versionName='0.2.1'\n"
+                    )),
+                ],
+            ):
+                verify_native_apk(
+                    apk, aapt, PRODUCT_PACKAGE,
+                    version_code=2001001, version_name="0.2.1",
+                )
 
 
 if __name__ == "__main__":
