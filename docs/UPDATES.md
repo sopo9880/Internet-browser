@@ -100,8 +100,15 @@ The project has two independent GitHub Actions workflows:
 - If a release with the same tag already exists, it does not overwrite it.
   If either platform build or secret validation fails, no release is posted.
   Non-0.x versions are intentionally not supported by the metadata script.
-- Both artifacts are built from the SAME main-branch commit. The installer
-  and APK are tagged v0.x.y. SHA256SUMS.txt is included in the release.
+- Normally both artifacts are built from the SAME main-branch commit.
+  **Exception for user-requested v0.2.1**: the Windows installer is built
+  from the release main commit, while the Android asset is the exact pinned
+  Chromium APK already officially signed in Actions run 39334182017.
+  The source commit, run, archive digest, original APK SHA-256 and signing
+  fingerprint are rechecked before publication. Android runtime behavior,
+  AdBlock/MV3, ByeDPI, media and user data migration remain unverified.
+  This limitation is disclosed on the official v0.2.1 release page.
+  SHA256SUMS.txt is included in the release.
 - No release code is executed for pull_request events. Release credentials
   are decoded into a temporary runner directory, not stored in source.
 - The four Secrets above have not been verified through this conversation:
