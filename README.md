@@ -91,3 +91,31 @@ helper which can offer the official AdBlock store link on initial
 installation. See docs/CHROMIUM_NATIVE_BUILD.md for the limitations:
 this path has NOT been compiled or device-verified yet, and the
 research signing identity must be stabilized before production.
+
+## v0.2.1 development status (not a released Android fix)
+
+**Android v0.2.0 cannot browse pages.** It was published without a
+compiled embedded Chromium engine. Do not clear existing user data.
+
+The v0.2.1 development branch adds a readable ByeDPI preset dropdown,
+Samsung/Android security Settings navigation and an explicit native
+Chromium CI/release readiness gate. The engine and actual AdBlock support
+are NOT implemented yet. The required gate stays failing until real
+engine integration and automatic Android navigation/extension tests exist.
+Do not publish v0.2.1 solely because the Flutter APK compiles.
+
+
+### Updated v0.2.1 architecture
+
+Android release builds now target the full Titanium/Chromium native ARM64
+APK; Windows stays Flutter/WebView2. The old non-functional Flutter Android
+APK is no longer an output of the required CI or release workflow.
+Both targets are controlled by one required PR CI pipeline and one
+signed release workflow. Android source compilation needs an isolated
+`chromium-large` Linux self-hosted runner; it is not confirmed online.
+
+**This code change alone does NOT implement the Titanium port of ByeDPI,
+video/offline library, Samsung security UX, or existing Flutter user-data
+migration.** The Android functional smoke gate intentionally rejects
+unverified binaries until genuine automated integration tests exist.
+See [docs/ANDROID_NATIVE_ARCHITECTURE.md](docs/ANDROID_NATIVE_ARCHITECTURE.md).

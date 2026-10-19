@@ -65,3 +65,45 @@ standalone APK, not an embedded Flutter engine. See
 docs/CHROMIUM_NATIVE_BUILD.md for runner requirements and limitations.
 The prototype APK never replaces signed v0.1.1 and cannot satisfy
 v0.2.0's AdBlock device acceptance gate on its own.
+
+## v0.2.1 recovery development — HOLD RELEASE UNTIL NATIVE BROWSER WORKS
+
+The published v0.2.0 Android app is NOT a usable Chromium browser. The
+native Chromium engine never shipped: a successful Flutter APK build
+was incorrectly treated as a completed product.
+
+- ByeDPI settings now expose a readable dropdown with descriptions and
+  actual safe ciadpi flags. The pictured GoodbyeDPI blacklist profile
+  strings are NOT valid ByeDPI/ciadpi arguments.
+- Android settings, welcome and APK update UI can open Android security
+  settings, with fallback. Samsung users can inspect Auto Blocker there;
+  the app never switches off security protections.
+- Preserve package IDs, Android signing, bookmarks, downloads, history
+  and existing settings; never erase data to mask an upgrade bug.
+- Actual embedded Chromium navigation, Chrome extensions, in-app ByeDPI
+  routing and media migration are NOT complete.
+- The mandatory v0.2.1 CI check in
+  tool/chromium/require_native_engine.py REJECTS absent AAR and missing
+  native emulator smoke evidence. Main-branch release preparation has
+  the same blocker. A claimed JSON report without real test provenance is
+  not proof of working features; build and wire the native CI executor.
+- The standalone Titanium research build does NOT produce an AAR, and
+  needs a separate large isolated runner (32+ GB RAM, 120+ GB free disk).
+- Only after feature implementation plus automatic integration checks pass
+  can a verified PR be merged and v0.2.1 released. Actual phone testing
+  remains after release, as requested.
+
+
+## v0.2.1 native pipeline integration (October 19, 2026)
+
+The correct product architecture is now **Windows Flutter/WebView2** plus
+**Android Titanium Chromium native application**. Both are jobs inside
+one PR CI and one release workflow; Android Flutter APKs are no longer built
+as CI/release products. This is a source/build routing change, NOT a claim
+that the resulting native Android experience is functionally complete.
+
+See [ANDROID_NATIVE_ARCHITECTURE.md](ANDROID_NATIVE_ARCHITECTURE.md) for
+exact job dependencies, production-signing isolation, update metadata
+and pending feature migration. No production Android release before
+native integration, AdBlock/ByeDPI/media/data-migration smoke and licensing
+are complete. A dedicated Chromium build runner is not yet confirmed.

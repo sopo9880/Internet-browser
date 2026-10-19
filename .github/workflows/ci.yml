@@ -1,4 +1,4 @@
-name: Browser v0.x CI
+name: Browser v0.x CI (Windows + Titanium Android)
 on:
   pull_request:
     branches: [main]
@@ -14,51 +14,54 @@ jobs:
         with:
           flutter-version: '3.35.7'
           channel: stable
-      - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android,windows .
+      - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
       - name: Restore project widget test after Flutter bootstrap
         run: git show HEAD:test/widget_test.dart > test/widget_test.dart
-      - run: python3 tool/prepare_platforms.py
       - name: Test release metadata and signing template (without secrets)
         run: |
           python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
           python3 tool/release_metadata.py
-          python3 tool/configure_android_signing.py
-      - name: Validate Android manifest XML
-        run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get
-      - name: Generate parcel launcher icon for Android and Windows
-        run: dart run flutter_launcher_icons
+      - name: Generate Windows launcher icon for tests
+        run: dart run flutter_launcher_icons -f flutter_launcher_icons_windows.yaml
       - run: dart format --output=write lib test
       - run: flutter analyze
       - run: flutter test
   android:
-    runs-on: ubuntu-24.04
-    needs: quality
+    # Required Titanium/Chromium native APK; never a Flutter Android shell.
+    # Safe disposable isolated runner, no production signing keys on PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, chromium-wsl2]
+    timeout-minutes: 1440
     env:
-      BROWSER_ANDROID_NDK_VERSION: '27.3.13750724'
+      CHROMIUM_NINJA_JOBS: '3'
+      CHROMIUM_SYNC_JOBS: '2'
+    needs: [quality, chromium_extension_source_pin]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.35.7'
-          channel: stable
-      - run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=android .
-      - run: python3 tool/prepare_platforms.py
-      - run: flutter pub get
-      - name: Generate parcel launcher icon for Android and Windows
-        run: dart run flutter_launcher_icons
-      - name: Build pinned Android-native ByeDPI SOCKS5 engines
-        run: python3 tool/build_android_byedpi.py
-      - run: flutter build apk --release
+      - name: Validate native app version
+        run: python3 tool/release_metadata.py
+      - name: Compile real Titanium Chromium ARM64 Android browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r BROWSER_NATIVE_VERSION BROWSER_NATIVE_VERSION_CODE < <(
+            python3 -c 'from tool.release_metadata import parse_pubspec; from pathlib import Path; m=parse_pubspec(Path("pubspec.yaml").read_text()); print(m.version, m.version_code)'
+          )
+          export BROWSER_NATIVE_VERSION BROWSER_NATIVE_VERSION_CODE
+          WORKSPACE="$RUNNER_TEMP/titanium-browser-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          bash tool/chromium/build_titanium_prototype.sh "$WORKSPACE" product-candidate
+          mkdir -p build/android-native
+          cp "$WORKSPACE/output/"*PRODUCT-CANDIDATE*.apk build/android-native/native-chromium.apk
+          cp "$WORKSPACE/output/provenance.json" build/android-native/provenance.json
+          test -s build/android-native/native-chromium.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Android-v0.2.0
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: android-titanium-native-candidate
+          path: build/android-native/*
           if-no-files-found: error
+          retention-days: 7
+
   windows:
     # Flutter 3.35.x cannot identify Visual Studio 2026 on windows-latest.
     runs-on: windows-2022
@@ -100,12 +103,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-v0.2.0
-          path: build/windows/x64/runner/Release/**
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Browser-Windows-Setup-v0.2.0
+          name: browser-windows-setup
           path: dist/Internet-browser-Windows-Setup-v*.exe
           if-no-files-found: error
 
@@ -119,8 +117,34 @@ jobs:
           python3 -m unittest discover -s tool/tests -p test_welcome_crx.py -v
           python3 tool/chromium/titanium_pin.py
           bash -n tool/chromium/build_titanium_prototype.sh
+          python3 -m unittest discover -s tool/tests -p test_titanium_product.py -v
       - name: Clarify native compilation requirement
         run: |
           echo "Source pinned and prototype builder syntax checked."
           echo "Real Chromium engine compilation requires a separate 32GB/120GB runner."
           echo "AdBlock installation and in-app engine remain UNVERIFIED."
+
+  android_chromium_runtime_gate:
+    # A compiled native Chromium APK is necessary, but NOT sufficient:
+    # require independently generated real Android integration evidence.
+    runs-on: ubuntu-24.04
+    needs: [quality, windows, chromium_extension_source_pin, android]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-titanium-native-candidate
+          path: build/android-native
+      - name: Verify native Android functional tests (fail closed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r VERSION VERSION_CODE < <(
+            python3 -c 'from tool.release_metadata import parse_pubspec; from pathlib import Path; m=parse_pubspec(Path("pubspec.yaml").read_text()); print(m.version, m.version_code)'
+          )
+          python3 -m tool.chromium.require_native_engine \
+            --apk build/android-native/native-chromium.apk \
+            --provenance build/android-native/provenance.json \
+            --smoke-report build/android-native/android-ci-smoke.json \
+            --version "$VERSION" --version-code "$VERSION_CODE" \
+            --integration-commit "$GITHUB_SHA"

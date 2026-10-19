@@ -58,7 +58,7 @@ A prototype workflow is in:
 .github/workflows/chromium-extension-prototype.yml
 
 The self-hosted runner must be labeled:
-self-hosted, linux, x64, chromium-large
+self-hosted, linux, x64, chromium-wsl2
 
 After registering a suitable isolated runner, apply the
 chromium-build label to existing PR #3. The labeled event starts the
@@ -154,3 +154,74 @@ in-app Chromium engine, Chromium-to-Flutter integration or ByeDPI transport.
 Real-device AdBlock verification is now a post-release activity. See
 docs/POST_RELEASE_ANDROID_VALIDATION.md. Do not advertise native extension
 support based only on the successful Flutter/WebView package build.
+
+## v0.2.1: compile the REAL Titanium-based Android product candidate
+
+The old Chromium/Flutter AAR contract is not a working Chromium engine.
+The shorter real native Android route is to **build Titanium as the Android
+browser application itself**, preserving Windows Flutter separately.
+
+We now provide an explicit second variant of the pinned Titanium ARM64
+builder. On a dedicated isolated `chromium-wsl2` Linux runner, run:
+
+    bash tool/chromium/build_titanium_prototype.sh /empty/large/workspace product-candidate
+
+This configures the actual Chromium `chrome_public_apk` target with
+`chrome_public_manifest_package = "io.github.sopo9880.internet_browser"`
+instead of constructing a stub AAR. The produced APK must pass an aapt2
+package-name check and Android apksigner verification.
+
+- The product candidate is **signed with a short-lived research key**, NOT
+  the key used by v0.2.0. Never install this over existing user data:
+  Android will reject the mismatched signing certificate.
+- This is a full Chromium browser candidate, not an embedded engine inside
+  Flutter. A genuinely usable browser still needs integration of ByeDPI,
+  video, user settings, versionCode, Chrome extension workflows, and a
+  non-destructive migration of previous Flutter user data.
+- The same Chromium source with a production signing path will be needed
+  for an installable 0.2.1 upgrade. Never use the production key in a
+  PR/self-hosted builder or third-party build script.
+- Titanium/Vanadium are GPL-2.0. Release requires complete corresponding
+  source and license notices, not just a modified binary.
+- The strict release gate remains RED; no claim of successful embedded AAR
+  or validated Android integration is made by this change.
+
+To request the expensive source build, apply `chromium-build` to the
+existing development PR #4. Workflow:
+`.github/workflows/chromium-extension-prototype.yml`.
+The job needs a connected `[self-hosted, linux, x64, chromium-wsl2]`
+runner and can queue if none is available. A passing lightweight Flutter
+CI run is NOT proof that this real Chromium compilation succeeded.
+
+
+## 2026-10-19: 23 GiB RAM + 24 GiB swap WSL2 source-build mode
+
+This repository's one required PR CI (ci.yml) now owns the genuine
+Titanium-native Android compile. The older separate research PR workflow
+was removed. In v0.2.1, do NOT follow earlier instructions in this
+document about PR #3 or the now-deleted chromium-extension-prototype.yml.
+
+On the user's dedicated Ubuntu 24.04 WSL2 distribution, memory visible
+inside Linux is ~23 GiB, swap is 24 GiB, CPUs visible are 12 and the
+Ubuntu ext4 filesystem has ~954 GiB free. A new
+tool/chromium/build_resources.py preflight admits this configuration
+only when enough physical available RAM, swap, combined capacity and
+disk are present; the earlier unconditional 30,000,000 KiB RAM gate
+is removed. A default 3-worker autoninja / 2-worker gclient sync
+configuration is patched into the exact, source-pinned upstream
+build.sh; if upstream commands change, patching fails closed.
+These limits trade compilation throughput for reduced OOM risk.
+A verified source-build success is still pending.
+
+Set CHROMIUM_NINJA_JOBS=2 to reduce memory pressure further if needed,
+or CHROMIUM_SYNC_JOBS=1 to reduce source download concurrency.
+Low-RAM preflight deliberately rejects values over 3 (ninja) / 2 (sync).
+The dedicated GitHub self-hosted Android build job has a 24-hour limit.
+NEVER change the Android runtime smoke gate merely to make CI green.
+
+This pinned upstream builder installs Debian/Ubuntu packages via sudo.
+A normal GitHub runner is noninteractive; password-protected sudo may
+block compilation. Plan privileged dependency installation inside the
+dedicated WSL distribution before connecting the runner, and use only
+trusted code. WSL2 and disabled Windows drive mounts are not a complete
+security boundary. Do NOT place production signing keys in this runner.

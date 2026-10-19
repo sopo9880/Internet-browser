@@ -32,11 +32,19 @@ class DpiOptions {
 
   static const _prefix = 'dpi_options_';
   static const presetNames = {
-    DpiPreset.balanced: '기본 (권장)',
+    DpiPreset.balanced: '기본 우회 (권장)',
     DpiPreset.split: '분할 전송',
     DpiPreset.disorder: '역순 전송',
     DpiPreset.aggressive: '강화 우회',
     DpiPreset.custom: '사용자 지정',
+  };
+
+  static const presetDescriptions = {
+    DpiPreset.balanced: '분할 전송과 자동 재시도를 조합하는 기본 모드입니다.',
+    DpiPreset.split: '분할 전송을 사용하며 사이트별 호환성이 다를 수 있습니다.',
+    DpiPreset.disorder: '전송 순서를 조정합니다. 일부 사이트가 느려질 수 있습니다.',
+    DpiPreset.aggressive: '여러 우회 방식을 조합하며 연결 안정성이 저하될 수 있습니다.',
+    DpiPreset.custom: '고급 설정에서 허용된 ByeDPI 인자를 직접 조정합니다.',
   };
 
   static bool validPosition(String value) =>
