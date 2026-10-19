@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Internet Browser Welcome",
+  "version": "0.2.0",
+  "description": "One-time, optional AdBlock recommendation for a new Chromium install.",
+  "permissions": ["storage", "tabs"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

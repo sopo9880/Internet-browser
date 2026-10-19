@@ -1,0 +1,23 @@
+:root { color-scheme: light dark; font-family: system-ui, "Noto Sans", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; color: CanvasText; background: Canvas; }
+main { max-width: 590px; margin: 0 auto; padding: 32px 18px 64px; }
+header { text-align: center; padding: 8px 0 26px; }
+header h1 { font-size: 2.2rem; margin: 10px 0 4px; }
+header p { line-height: 1.6; }
+.eyebrow { text-transform: uppercase; font-size: .8rem; letter-spacing: .07em; opacity: .7; }
+.symbol { font-size: 3rem; color: #4ba6dd; }
+article { border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: 18px; padding: 22px; }
+.intro { display: flex; align-items: center; gap: 14px; }
+.shield { font-size: 2.1rem; color: #4ba6dd; }
+h2 { font-size: 1.25rem; margin: 4px 0; }
+article p { line-height: 1.6; }
+.small { font-size: .83rem; opacity: .73; line-height: 1.6; overflow-wrap: anywhere; }
+code { font-family: ui-monospace, monospace; }
+.primary, #welcome-complete { display: block; width: 100%; border: 0; border-radius: 12px; padding: 14px; font: inherit; font-weight: 600; text-align: center; }
+.primary { background: #256da1; color: white; text-decoration: none; margin-top: 18px; }
+.primary:focus-visible, #welcome-complete:focus-visible { outline: 3px solid #4ba6dd; outline-offset: 3px; }
+.features { margin: 20px 2px; display: grid; gap: 12px; }
+.features div { border-radius: 10px; background: color-mix(in srgb, CanvasText 7%, transparent); padding: 14px; }
+#welcome-complete { cursor: pointer; background: color-mix(in srgb, CanvasText 12%, Canvas); color: CanvasText; }
+.center { text-align: center; }

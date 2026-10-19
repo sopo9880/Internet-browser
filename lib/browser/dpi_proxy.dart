@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'android_media_bridge.dart';
+import 'dpi_options.dart';
+
 /// App-only DPI transport. A SOCKS5 greeting does NOT prove that individual
 /// sites can be reached through a DPI rule; show that limitation in the UI.
 class BrowserDpiProxy {
@@ -45,23 +48,24 @@ class BrowserDpiProxy {
     }
   }
 
-  Future<bool> initialize({required bool enabled}) async {
+  Future<bool> initialize({required bool enabled,
+      DpiOptions options = const DpiOptions()}) async {
     if (!enabled) {
       _status = '사용 안 함';
       _connected = false;
       return false;
     }
     if (defaultTargetPlatform == TargetPlatform.windows) {
-      return _startWindows();
+      return _startWindows(options);
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return _applyAndroid();
+      return _applyAndroid(options);
     }
     _status = '지원하지 않는 플랫폼';
     return false;
   }
 
-  Future<bool> _startWindows() async {
+  Future<bool> _startWindows(DpiOptions options) async {
     if (!await checkLocalSocks()) {
       final exeDirectory = File(Platform.resolvedExecutable).parent.path;
       final binary = File(
@@ -74,11 +78,7 @@ class BrowserDpiProxy {
       try {
         _ownedProcess = await Process.start(
           binary.path,
-          const [
-            '-i', host, '-p', '1080',
-            '--split', '1', '--disorder', '3+s',
-            '--mod-http=h,d', '--auto=torst', '--tlsrec', '1+s',
-          ],
+          options.toArguments(windows: true),
         );
         _ownedProcess!.stdout.listen((_) {});
         _ownedProcess!.stderr.listen((_) {});
@@ -108,19 +108,61 @@ class BrowserDpiProxy {
     return true;
   }
 
-  Future<bool> _applyAndroid() async {
-    if (!await checkLocalSocks()) {
-      _connected = false;
-      _status = '로컬 SOCKS5 서버가 없습니다. ByeDPI를 먼저 실행하세요.';
+  /// Android bundles an NDK-native ByeDPI executable in nativeLibraryDir.
+  /// No other app or external SOCKS5 service is needed.
+  Future<bool> _applyAndroid(DpiOptions options) async {
+    final occupied = await checkLocalSocks();
+    if (occupied && _ownedProcess == null) {
+      _status = '127.0.0.1:1080 포트를 다른 SOCKS5 엔진이 사용 중입니다.';
       return false;
     }
+    if (!occupied) {
+      final libDir = await AndroidMediaBridge.nativeLibraryDir();
+      if (libDir == null || libDir.isEmpty) {
+        _status = 'Android 네이티브 엔진 경로를 확인하지 못했습니다.';
+        return false;
+      }
+      final exe = File('$libDir${Platform.pathSeparator}libciadpi.so');
+      if (!await exe.exists()) {
+        _status = '이 기기의 Android ABI에 맞는 내장 ByeDPI 엔진이 없습니다.';
+        return false;
+      }
+      try {
+        _ownedProcess = await Process.start(
+          exe.path,
+          options.toArguments(windows: false),
+        );
+        _ownedProcess!.stdout.listen((_) {});
+        _ownedProcess!.stderr.listen((_) {});
+        var ready = false;
+        for (var i = 0; i < 12; i++) {
+          if (await checkLocalSocks()) {
+            ready = true;
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+        if (!ready) {
+          _ownedProcess?.kill();
+          _ownedProcess = null;
+          _status = '내장 ByeDPI 시작 실패: SOCKS5 응답 없음';
+          return false;
+        }
+      } catch (error) {
+        _ownedProcess?.kill();
+        _ownedProcess = null;
+        _status = '내장 ByeDPI 실행 오류: $error';
+        return false;
+      }
+    }
     try {
-      final available = await WebViewFeature.isFeatureSupported(
+      final supported = await WebViewFeature.isFeatureSupported(
         WebViewFeature.PROXY_OVERRIDE,
       );
-      if (!available) {
-        _connected = false;
+      if (!supported) {
         _status = 'Android WebView 프록시 설정을 지원하지 않습니다.';
+        _ownedProcess?.kill();
+        _ownedProcess = null;
         return false;
       }
       await ProxyController.instance().setProxyOverride(
@@ -130,11 +172,13 @@ class BrowserDpiProxy {
         ),
       );
       _connected = true;
-      _status = 'Android WebView 로컬 프록시 연결 · 우회 검증 필요';
+      _status = '내장 ByeDPI SOCKS5 연결 · 사이트별 실제 우회 검증 필요';
       return true;
     } catch (error) {
       _connected = false;
-      _status = '프록시 연결 실패: $error';
+      _ownedProcess?.kill();
+      _ownedProcess = null;
+      _status = 'WebView SOCKS5 설정 실패: $error';
       return false;
     }
   }
@@ -147,6 +191,8 @@ class BrowserDpiProxy {
       // WebView implementations can report unsupported proxy operations.
     }
     _connected = false;
+    _ownedProcess?.kill();
+    _ownedProcess = null;
     _status = '사용 안 함';
   }
 

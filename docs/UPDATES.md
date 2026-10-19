@@ -47,18 +47,29 @@ device policy allows it; the app neither bypasses nor disables Android
 security settings. When an app comes from Google Play, use Play-managed
 update APIs instead of side-loading a different certificate.
 
-## Production release gate
+## Pre-release automated gate and post-release device QA
 
-1. Validate Android tests and Windows CI (same SHA).
-2. Build and sign the Android APK with the stable keystore. Verify signing
-   certificate fingerprint matches previous releases.
-3. Build Windows setup from the same source SHA and keep AppId unchanged.
-4. Upload both named files to a public GitHub Release tagged v0.x.y.
-5. Verify asset digests, installation and upgrade on real devices.
-6. Release only after the explicit verification/approval workflow.
+1. Validate Flutter analysis, widget/unit tests, Android build, Windows
+   installer build and the source-pin checks at the PR head SHA.
+2. After verified PR merge, the trusted main workflow reruns quality checks
+   and builds the Android APK using the persistent release signing key.
+   Verify signing and preserve the existing application ID.
+3. Build Windows Setup from the same main SHA; keep the Inno Setup AppId.
+4. Verify both published asset names and SHA-256 checksums, then create the
+   official GitHub Release with a 0.x tag.
+5. AFTER publication, install the exact signed APK/EXE and test the real
+   device upgrade and Chromium/AdBlock, ByeDPI and offline video behavior.
+   Record failed features and ship a corrective 0.x patch if needed.
 
-The updater stays quiet until an official stable release exists. Release
-signing and installation must pass Actions and real device verification.
+Physical-device acceptance no longer blocks PR CI, PR merge, or release
+Actions. The strict validator in tool/chromium_extension_acceptance.py is
+retained for post-release trusted evidence, not as proof that the existing
+native Chromium engine is integrated. The current engine implementation is
+still incomplete and a successful APK build does not imply working Chrome
+extensions. See docs/POST_RELEASE_ANDROID_VALIDATION.md.
+
+The updater stays quiet until an official stable release exists. Android
+signing, platform builds and checksum generation remain required by Actions.
 
 
 ## GitHub Actions release secrets (set up once)
@@ -125,5 +136,6 @@ GitHub-downloaded asset bytes, not publisher identity.
 
 After the release job is triggered, verify successful Actions results,
 release version/tag, actual GitHub Release publication, expected Windows
-installer and signed Android APK, SHA256SUMS and a real-device update.
-A successful CI build alone is not proof of a complete official release.
+installer and signed Android APK, and SHA256SUMS. Then perform a separate
+post-release physical-device update and feature-acceptance check.
+A successful CI build alone is not proof of working Chromium extensions.

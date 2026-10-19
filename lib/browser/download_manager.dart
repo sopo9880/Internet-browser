@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'video_detector.dart';
+import 'video_metadata.dart';
 
 enum VideoDownloadState { running, complete, failed, cancelled }
 
@@ -18,6 +19,10 @@ class VideoDownloadItem {
     required this.state,
     this.progress = 0,
     this.error,
+    this.resolvedTitle,
+    this.qualityLabel,
+    this.thumbnailUrl,
+    this.durationSeconds,
   });
 
   final Uri url;
@@ -26,6 +31,10 @@ class VideoDownloadItem {
   VideoDownloadState state;
   int progress;
   String? error;
+  final String? resolvedTitle;
+  final String? qualityLabel;
+  final String? thumbnailUrl;
+  final int? durationSeconds;
 }
 
 /// Stores videos in the app's private Documents/Videos folder.
@@ -89,9 +98,13 @@ class VideoDownloadManager extends ChangeNotifier {
     return clean;
   }
 
-  Future<String> _unusedPath(Uri url) async {
+  Future<String> _unusedPath(Uri url, {String? title}) async {
     final dir = await _videoDirectory();
-    final safe = safeFileName(url);
+    final fallback = safeFileName(url);
+    final extension = fallback.substring(fallback.lastIndexOf('.'));
+    final safe = title == null || title.trim().isEmpty
+        ? fallback
+        : '${VideoPageMetadata.safeFileStem(title)}$extension';
     final dot = safe.lastIndexOf('.');
     final stem = safe.substring(0, dot);
     final ext = safe.substring(dot);
@@ -104,17 +117,20 @@ class VideoDownloadManager extends ChangeNotifier {
     return candidate;
   }
 
-  Future<VideoDownloadItem> download(Uri url) async {
+  Future<VideoDownloadItem> download(Uri url,
+      {VideoPageMetadata? metadata}) async {
     if (!VideoDetector.isDirectVideo(url)) {
       throw ArgumentError('Only direct HTTP(S) video files are supported.');
     }
-    final destination = await _unusedPath(url);
+    final destination = await _unusedPath(url, title: metadata?.title);
     final token = CancelToken();
     final item = VideoDownloadItem(
       url: url,
       filePath: destination,
       fileName: destination.split(Platform.pathSeparator).last,
       state: VideoDownloadState.running,
+      resolvedTitle: metadata?.title,
+      thumbnailUrl: metadata?.thumbnail,
     );
     _items.insert(0, item);
     _tokens[item] = token;
@@ -171,6 +187,7 @@ class VideoDownloadManager extends ChangeNotifier {
     final youtube = YoutubeExplode();
     VideoDownloadItem? item;
     try {
+      final videoInfo = await youtube.videos.get(id);
       final manifest = await youtube.videos.streams.getManifest(id);
       final candidates = manifest.muxed.where(
         (stream) => stream.container == StreamContainer.mp4 ||
@@ -186,12 +203,17 @@ class VideoDownloadManager extends ChangeNotifier {
       final extension = choice.container.name;
       final path = await _unusedPath(
         Uri.parse('https://media.local/youtube_$id.$extension'),
+        title: videoInfo.title,
       );
       item = VideoDownloadItem(
         url: page,
         filePath: path,
         fileName: path.split(Platform.pathSeparator).last,
         state: VideoDownloadState.running,
+        resolvedTitle: videoInfo.title,
+        thumbnailUrl: videoInfo.thumbnails.highResUrl,
+        qualityLabel: '${choice.videoResolution.height}p',
+        durationSeconds: videoInfo.duration?.inSeconds,
       );
       _items.insert(0, item);
       notifyListeners();

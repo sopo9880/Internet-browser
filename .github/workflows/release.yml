@@ -100,6 +100,8 @@ jobs:
       - run: flutter pub get
       - name: Generate parcel launcher icon for Android and Windows
         run: dart run flutter_launcher_icons
+      - name: Build pinned Android-native ByeDPI SOCKS5 engines
+        run: python3 tool/build_android_byedpi.py
       - name: Materialize release keystore and configure Gradle
         # Secrets are available ONLY in this trusted, main-branch release job.
         env:
@@ -254,9 +256,13 @@ jobs:
           set -euo pipefail
           APK="dist/Internet-browser-Android-v$VERSION.apk"
           EXE="dist/Internet-browser-Windows-Setup-v$VERSION.exe"
+          RELEASE_NOTES="Windows installer and Android APK signed using the stored release key. Read docs/UPDATES.md before upgrading. SHA-256 checksums are attached."
+          if [ "$VERSION" = "0.2.0" ]; then
+            RELEASE_NOTES="$RELEASE_NOTES Android Chromium/AdBlock physical-device validation is deferred until AFTER publication. An APK build does not prove extension support. Follow docs/POST_RELEASE_ANDROID_VALIDATION.md."
+          fi
           gh release create "$TAG" \
             "$APK" "$EXE" "dist/SHA256SUMS.txt" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Internet Browser v$VERSION" \
-            --notes "Windows installer and Android APK signed using the stored release key. Read docs/UPDATES.md before upgrading. SHA-256 checksums are attached."
+            --notes "$RELEASE_NOTES"

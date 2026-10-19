@@ -51,10 +51,12 @@ jobs:
       - run: flutter pub get
       - name: Generate parcel launcher icon for Android and Windows
         run: dart run flutter_launcher_icons
+      - name: Build pinned Android-native ByeDPI SOCKS5 engines
+        run: python3 tool/build_android_byedpi.py
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Android-v0.1.1
+          name: Browser-Android-v0.2.0
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
@@ -98,11 +100,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-v0.1.1
+          name: Browser-Windows-v0.2.0
           path: build/windows/x64/runner/Release/**
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: Browser-Windows-Setup-v0.1.1
+          name: Browser-Windows-Setup-v0.2.0
           path: dist/Internet-browser-Windows-Setup-v*.exe
           if-no-files-found: error
+
+  chromium_extension_source_pin:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate real Chromium MV3 research source pin
+        run: |
+          python3 -m unittest discover -s tool/tests -p test_titanium_pin.py -v
+          python3 -m unittest discover -s tool/tests -p test_welcome_crx.py -v
+          python3 tool/chromium/titanium_pin.py
+          bash -n tool/chromium/build_titanium_prototype.sh
+      - name: Clarify native compilation requirement
+        run: |
+          echo "Source pinned and prototype builder syntax checked."
+          echo "Real Chromium engine compilation requires a separate 32GB/120GB runner."
+          echo "AdBlock installation and in-app engine remain UNVERIFIED."
