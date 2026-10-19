@@ -37,7 +37,7 @@ def varint(value: int) -> bytes:
         result.append((value & 127) | 128)
         value >>= 7
     result.append(value)
-    return bytes(result) + bytes([value])
+    return bytes(result)
 
 
 def proto_bytes(field_number: int, value: bytes) -> bytes:
