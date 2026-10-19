@@ -65,6 +65,22 @@ void main() {
     expect(host.installCalls, 0);
   });
 
+  testWidgets('previously installed AdBlock is recognized without reinstall',
+      (tester) async {
+    final host = _FakeExtensionHost(available: true, installed: true);
+    await tester.pumpWidget(MaterialApp(
+      home: WelcomeScreen(onContinue: () async {}, extensionHost: host),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AdBlock 설치 및 활성화 확인'), findsOneWidget);
+    final install = tester.widget<FilledButton>(
+      find.byKey(const Key('welcome-adblock-install')),
+    );
+    expect(install.onPressed, isNull);
+    expect(host.installCalls, 0);
+  });
+
   testWidgets('install is user-initiated and verifies actual enabled state',
       (tester) async {
     final host = _FakeExtensionHost(available: true);
