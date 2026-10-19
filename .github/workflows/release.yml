@@ -79,7 +79,7 @@ jobs:
     # Production signing secrets are NEVER available to this runner.
     needs: [prepare, quality]
     if: needs.prepare.outputs.publish == 'true'
-    runs-on: [self-hosted, linux, x64, chromium-large]
+    runs-on: [self-hosted, linux, x64, chromium-wsl2]
     timeout-minutes: 1440
     env:
       CHROMIUM_NINJA_JOBS: '3'

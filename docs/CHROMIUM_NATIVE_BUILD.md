@@ -58,7 +58,7 @@ A prototype workflow is in:
 .github/workflows/chromium-extension-prototype.yml
 
 The self-hosted runner must be labeled:
-self-hosted, linux, x64, chromium-large
+self-hosted, linux, x64, chromium-wsl2
 
 After registering a suitable isolated runner, apply the
 chromium-build label to existing PR #3. The labeled event starts the
@@ -162,7 +162,7 @@ The shorter real native Android route is to **build Titanium as the Android
 browser application itself**, preserving Windows Flutter separately.
 
 We now provide an explicit second variant of the pinned Titanium ARM64
-builder. On a dedicated isolated `chromium-large` Linux runner, run:
+builder. On a dedicated isolated `chromium-wsl2` Linux runner, run:
 
     bash tool/chromium/build_titanium_prototype.sh /empty/large/workspace product-candidate
 
@@ -189,7 +189,7 @@ package-name check and Android apksigner verification.
 To request the expensive source build, apply `chromium-build` to the
 existing development PR #4. Workflow:
 `.github/workflows/chromium-extension-prototype.yml`.
-The job needs a connected `[self-hosted, linux, x64, chromium-large]`
+The job needs a connected `[self-hosted, linux, x64, chromium-wsl2]`
 runner and can queue if none is available. A passing lightweight Flutter
 CI run is NOT proof that this real Chromium compilation succeeded.
 

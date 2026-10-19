@@ -129,7 +129,8 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertIn("needs: [prepare, quality, android, android_gate, android_sign, windows]", release)
         self.assertIn("08116054e3a1de465da9357649c045fbb06e6d06f2c6108cda5e6dfd81d82e4a", release)
         for workflow in (ci, release):
-            self.assertIn("runs-on: [self-hosted, linux, x64, chromium-large]", workflow)
+            self.assertIn("runs-on: [self-hosted, linux, x64, chromium-wsl2]", workflow)
+            self.assertNotIn("runs-on: [self-hosted, linux, x64, chromium-large]", workflow)
             self.assertNotIn("flutter build apk", workflow)
         self.assertFalse(
             (root / ".github/workflows/chromium-extension-prototype.yml").exists()

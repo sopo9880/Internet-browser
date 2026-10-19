@@ -10,7 +10,7 @@ PR development runs ONE required CI workflow:
        +-- chromium_extension_source_pin: pinned Titanium+Vanadium checks
        +-- windows: Flutter Windows + ByeDPI + Inno EXE artifact
        +-- android: REAL Titanium Chromium ARM64 source compilation
-       |      self-hosted, linux, x64, chromium-large (isolated runner)
+       |      self-hosted, linux, x64, chromium-wsl2 (isolated runner)
        |      package io.github.sopo9880.internet_browser
        |      versionCode derived from pubspec (v0.2.1 = 2,001,001)
        |      disposable test signing key; NO production secrets
@@ -64,7 +64,7 @@ PR #4. Push to main then triggers ONE signed release workflow:
 ### Blockers before v0.2.1 release
 
 1. **Runner:** register an isolated Linux x86_64 runner labeled
-   `self-hosted`, `linux`, `x64`, `chromium-large` with >=20 GiB RAM,
+   `self-hosted`, `linux`, `x64`, `chromium-wsl2` with >=20 GiB RAM,
    >=16 GiB swap, >=40 GiB combined memory/swap, >=120 GB free Linux
    disk, and >=12 GiB available RAM. On the personal Windows 11 WSL2
    Ubuntu-24.04 builder: 23 GiB RAM, 24 GiB swap, 12 visible logical CPUs,
@@ -107,7 +107,7 @@ or release v0.2.1 while the native pipeline has not passed.
   Keep Windows powered and avoid WSL shutdown while it runs.
 - Install the official Linux x64 GitHub Actions runner only from the exact
   repository Settings > Actions > Runners > New self-hosted runner instructions.
-  The runner must register labels [self-hosted, linux, x64, chromium-large].
+  The runner must register labels [self-hosted, linux, x64, chromium-wsl2].
   Registration tokens are short-lived SECRET credentials; never paste them
   into ChatGPT, logs or repository code. Do not run the runner as Windows
   administrator or put production Android signing secrets on WSL.
@@ -123,3 +123,13 @@ or release v0.2.1 while the native pipeline has not passed.
   run from the previously removed workflow. Cancel the obsolete run in
   GitHub Actions before connecting a scarce runner, so it will not consume
   hours of compile time ahead of the current PR CI.
+
+
+### Distinct WSL2 runner label and queued older CI
+
+Use **chromium-wsl2** as the only custom runner label for this user's
+new Ubuntu-24.04 WSL instance. Do NOT add chromium-large: older queued
+workflows from the pre-optimization branch require that legacy label
+and must not run on the new resource-constrained machine. GitHub's
+automatic self-hosted / linux / x64 labels still apply. The obsolete
+runs can be cancelled manually from the Actions UI.

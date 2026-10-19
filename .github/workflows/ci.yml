@@ -31,7 +31,7 @@ jobs:
     # Required Titanium/Chromium native APK; never a Flutter Android shell.
     # Safe disposable isolated runner, no production signing keys on PRs.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, chromium-large]
+    runs-on: [self-hosted, linux, x64, chromium-wsl2]
     timeout-minutes: 1440
     env:
       CHROMIUM_NINJA_JOBS: '3'
