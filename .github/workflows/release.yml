@@ -64,8 +64,6 @@ jobs:
       - name: Generate native project wrappers
         run: flutter create --project-name=internet_browser --org=io.github.sopo9880 --platforms=windows .
       - run: git show HEAD:test/widget_test.dart > test/widget_test.dart
-      - name: Verify release signing template without accessing keys
-        run: python3 tool/configure_android_signing.py
       - name: Check Python release metadata and signing helpers
         run: python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
       - run: flutter pub get

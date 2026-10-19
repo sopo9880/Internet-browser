@@ -43,17 +43,17 @@ PR #4. Push to main then triggers ONE signed release workflow:
 ### Version and upgrade safety
 
 - Native Chromium Android is a full application, not a Flutter AAR or an
-  externally launched Titanium APK. \`chrome_public_manifest_package\` is
-  forced to the already released \`io.github.sopo9880.internet_browser\`.
+  externally launched Titanium APK. `chrome_public_manifest_package` is
+  forced to the already released `io.github.sopo9880.internet_browser`.
 - Chromium's default native versionCode would not respect the Flutter 0.x
-  scheme. GN \`android_override_version_code\` and
-  \`android_override_version_name\` are set from the exact pubspec metadata.
+  scheme. GN `android_override_version_code` and
+  `android_override_version_name` are set from the exact pubspec metadata.
 - The CI native product APK has a short-lived key and must NEVER be installed
   over production v0.2.0 (different signer).
 - The GitHub-hosted release signing job uses the existing keystore ONLY after
   automated integration is green, and rejects any signer whose certificate
   digest differs from the v0.2.0 release:
-  \`08116054e3a1de465da9357649c045fbb06e6d06f2c6108cda5e6dfd81d82e4a\`.
+  `08116054e3a1de465da9357649c045fbb06e6d06f2c6108cda5e6dfd81d82e4a`.
 - Same package + signer + increasing versionCode are NECESSARY but not
   sufficient. The previous Flutter user's app-private files, settings,
   videos/bookmarks/history require a genuine non-destructive migration into
@@ -64,7 +64,7 @@ PR #4. Push to main then triggers ONE signed release workflow:
 ### Blockers before v0.2.1 release
 
 1. **Runner:** register an isolated Linux x86_64 runner labeled
-   \`self-hosted\`, \`linux\`, \`x64\`, \`chromium-large\` with >=32 GB RAM
+   `self-hosted`, `linux`, `x64`, `chromium-large` with >=32 GB RAM
    and >=120 GB free disk. Native Chromium source build remains queued
    without hardware, not a "completed Chromium integration".
 2. **Android features:** migrate existing Flutter features to native
@@ -72,10 +72,10 @@ PR #4. Push to main then triggers ONE signed release workflow:
    exists in Flutter, NOT in Titanium; same for DPI dropdown, Samsung
    security flow, video download/library/offline playback.
 3. **AdBlock:** verify exact Chrome Web Store ID
-   \`gighmmpiobklfepjocnamgkkbiglidom\` installs, MV3 service worker runs
+   `gighmmpiobklfepjocnamgkkbiglidom` installs, MV3 service worker runs
    and network requests really are blocked. Source support alone isn't proof.
 4. **Automated acceptance:** instrument an actual Android emulator/device
-   with the exact compiled APK and generate \`android-ci-smoke.json\` only
+   with the exact compiled APK and generate `android-ci-smoke.json` only
    from genuine test results. The required gate rejects its absence. Do not
    hand-author a fake passing report. Physical user-device tests remain
    AFTER release under the project's explicit policy.

@@ -112,7 +112,7 @@ APK; Windows stays Flutter/WebView2. The old non-functional Flutter Android
 APK is no longer an output of the required CI or release workflow.
 Both targets are controlled by one required PR CI pipeline and one
 signed release workflow. Android source compilation needs an isolated
-\`chromium-large\` Linux self-hosted runner; it is not confirmed online.
+`chromium-large` Linux self-hosted runner; it is not confirmed online.
 
 **This code change alone does NOT implement the Titanium port of ByeDPI,
 video/offline library, Samsung security UX, or existing Flutter user-data

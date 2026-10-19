@@ -21,7 +21,6 @@ jobs:
         run: |
           python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
           python3 tool/release_metadata.py
-          python3 tool/configure_android_signing.py
       - run: flutter pub get
       - name: Generate Windows launcher icon for tests
         run: dart run flutter_launcher_icons -f flutter_launcher_icons_windows.yaml
