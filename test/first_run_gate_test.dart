@@ -15,7 +15,14 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
 
     await tester.pumpWidget(const InternetBrowserApp());
-    await tester.pumpAndSettle();
+    // The first-run gate displays an indeterminate loading animation until
+    // preferences resolve. pumpAndSettle can time out on that animation,
+    // so wait for the actual welcome route with bounded frame pumps.
+    for (var attempt = 0;
+        attempt < 20 && find.byType(WelcomeScreen).evaluate().isEmpty;
+        attempt++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(find.byType(WelcomeScreen), findsOneWidget);
