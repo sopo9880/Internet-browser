@@ -63,10 +63,12 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/39225095884" > "$RUNNER_TEMP/source-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/jobs/117970070549" > "$RUNNER_TEMP/source-job.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/12204054700" > "$RUNNER_TEMP/source-artifact.json"
+          gh api "repos/$GITHUB_REPOSITORY/commits/36a1953e25d7016a9b8b4bb5cd48442c28d8d74b" > "$RUNNER_TEMP/source-merge-commit.json"
           python3 -m tool.chromium.sign_candidate metadata \
             --run "$RUNNER_TEMP/source-run.json" \
             --job "$RUNNER_TEMP/source-job.json" \
-            --artifact "$RUNNER_TEMP/source-artifact.json"
+            --artifact "$RUNNER_TEMP/source-artifact.json" \
+            --merge-commit "$RUNNER_TEMP/source-merge-commit.json"
       - name: Download ONLY the pinned prior Android Chromium APK (no compilation)
         uses: actions/download-artifact@v4
         with:

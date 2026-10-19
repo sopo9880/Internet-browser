@@ -25,6 +25,10 @@ ARTIFACT_ID = 12204054700
 ARTIFACT_NAME = "android-titanium-native-candidate"
 ARTIFACT_ZIP_SHA256 = "0f58291262c754ac596c2158077d09f1e5cac39753d8af1bf483a0105b391c79"
 BUILT_HEAD_SHA = "97f37cd99b318764374605f5df72b5aebfd11551"
+# pull_request Actions use the generated merge commit as GITHUB_SHA,
+# not the PR branch head. Both fixed SHAs were verified from GitHub.
+BUILD_MERGE_SHA = "36a1953e25d7016a9b8b4bb5cd48442c28d8d74b"
+BUILD_BASE_SHA = "9cddceb0c1f7834220f0d92deea5fc5953467aec"
 REPO_ID = 1424387583
 APP_PACKAGE = "io.github.sopo9880.internet_browser"
 VERSION_NAME = "0.2.1"
@@ -52,7 +56,8 @@ def _load(path: Path) -> dict:
     return content
 
 
-def verify_source_metadata(run: dict, job: dict, artifact: dict) -> None:
+def verify_source_metadata(run: dict, job: dict, artifact: dict,
+                           merge_commit: dict) -> None:
     """Allow a failed overall CI only when its actual Android job passed."""
     for field, value in (
         ("id", RUN_ID), ("status", "completed"), ("event", "pull_request"),
@@ -80,6 +85,22 @@ def verify_source_metadata(run: dict, job: dict, artifact: dict) -> None:
     ):
         _require(wf.get(field) == value, f"Artifact workflow provenance mismatch: {field}")
 
+    # PR Actions checkout refs/pull/4/merge; verify exact synthetic commit.
+    prs = run.get("pull_requests")
+    _require(isinstance(prs, list) and len(prs) == 1,
+             "Expected exactly one pinned source pull request")
+    pr = prs[0]
+    _require(pr.get("number") == 4, "Source run PR number mismatch")
+    _require(pr.get("head", {}).get("sha") == BUILT_HEAD_SHA,
+             "Source PR head SHA mismatch")
+    _require(pr.get("base", {}).get("sha") == BUILD_BASE_SHA,
+             "Source PR base SHA mismatch")
+    _require(merge_commit.get("sha") == BUILD_MERGE_SHA,
+             "Unexpected pull request merge checkout SHA")
+    _require([parent.get("sha") for parent in merge_commit.get("parents", [])]
+             == [BUILD_BASE_SHA, BUILT_HEAD_SHA],
+             "Build merge checkout parents differ from approved PR head/base")
+
 
 def verify_provenance(apk: Path, report: dict) -> str:
     _require(apk.is_file() and apk.stat().st_size > 1_000_000, "Missing compiled native APK")
@@ -97,7 +118,7 @@ def verify_provenance(apk: Path, report: dict) -> str:
         "app_version": VERSION_NAME,
         "android_version_code": VERSION_CODE,
         "required_adblock_id": REQUIRED_ADBLOCK_ID,
-        "integration_commit": BUILT_HEAD_SHA,
+        "integration_commit": BUILD_MERGE_SHA,
     }
     for field, value in expected.items():
         _require(report.get(field) == value, f"Native candidate provenance mismatch: {field}")
@@ -155,6 +176,7 @@ def verify_signed_candidate(candidate: Path, signed: Path, aapt2: Path,
         "source_job_id": JOB_ID,
         "source_artifact_id": ARTIFACT_ID,
         "source_commit": BUILT_HEAD_SHA,
+        "original_ci_merge_checkout_commit": BUILD_MERGE_SHA,
         "original_apk_sha256": original,
         "signed_apk_sha256": final,
         "release_certificate_sha256": signer,
@@ -171,6 +193,7 @@ def main() -> None:
     parser.add_argument("--run", type=Path)
     parser.add_argument("--job", type=Path)
     parser.add_argument("--artifact", type=Path)
+    parser.add_argument("--merge-commit", type=Path)
     parser.add_argument("--apk", type=Path)
     parser.add_argument("--provenance", type=Path)
     parser.add_argument("--candidate", type=Path)
@@ -180,9 +203,10 @@ def main() -> None:
     parser.add_argument("--report", type=Path)
     options = parser.parse_args()
     if options.command == "metadata":
-        if not options.run or not options.job or not options.artifact:
-            parser.error("metadata requires --run --job --artifact")
-        verify_source_metadata(_load(options.run), _load(options.job), _load(options.artifact))
+        if not all((options.run, options.job, options.artifact, options.merge_commit)):
+            parser.error("metadata requires --run --job --artifact --merge-commit")
+        verify_source_metadata(_load(options.run), _load(options.job),
+                               _load(options.artifact), _load(options.merge_commit))
         print("Pinned historical run, Android job and immutable artifact digest verified.")
     elif options.command == "source":
         if not all((options.apk, options.provenance, options.aapt2, options.apksigner)):

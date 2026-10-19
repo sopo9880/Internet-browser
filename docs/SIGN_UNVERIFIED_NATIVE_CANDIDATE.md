@@ -20,6 +20,10 @@ over existing v0.2.0 user data or distribute it as a stable release.
 
 - Pin source workflow run, successful Android job, artifact ID, archive SHA-256,
   exact source SHA, package name, versionName and versionCode.
+- The original PR head was 97f37cd99b3, while Actions GITHUB_SHA was its
+  synthetic checkout merge 36a1953e25d7. Confirm the original merge's exact
+  base/head parents and compare the provenance to that generated merge SHA.
+  This is not a waived source check or a different APK.
 - Before accessing secrets, validate GitHub API metadata, original APK file
   digest in provenance, manifest identity and disposable signing certificate.
 - ONLY a manual workflow_dispatch on the default main branch with explicit

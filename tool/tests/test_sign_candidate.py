@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from tool.chromium.sign_candidate import (
     ARTIFACT_ID, ARTIFACT_NAME, ARTIFACT_ZIP_SHA256, BUILT_HEAD_SHA,
+    BUILD_BASE_SHA, BUILD_MERGE_SHA,
     JOB_ID, PRODUCTION_CERT_SHA256, REPO_ID, RUN_ID,
     verify_apk_identity, verify_provenance, verify_signed_candidate,
     verify_source_metadata,
@@ -24,6 +25,9 @@ class SignCandidateTests(unittest.TestCase):
             "event": "pull_request", "head_sha": BUILT_HEAD_SHA,
             "head_branch": "feat/v0.2.1-browser-recovery",
             "repository": {"id": REPO_ID}, "head_repository": {"id": REPO_ID},
+            "pull_requests": [{"number": 4,
+                               "head": {"sha": BUILT_HEAD_SHA},
+                               "base": {"sha": BUILD_BASE_SHA}}],
         }
         job = {
             "id": JOB_ID, "run_id": RUN_ID, "name": "android",
@@ -37,7 +41,9 @@ class SignCandidateTests(unittest.TestCase):
                 "head_repository_id": REPO_ID, "head_sha": BUILT_HEAD_SHA,
             },
         }
-        return run, job, artifact
+        merge_commit = {"sha": BUILD_MERGE_SHA, "parents": [
+            {"sha": BUILD_BASE_SHA}, {"sha": BUILT_HEAD_SHA}]}
+        return run, job, artifact, merge_commit
 
     def source_report(self, digest):
         return {
@@ -51,16 +57,16 @@ class SignCandidateTests(unittest.TestCase):
             "disposable_test_signer_not_upgrade_compatible": True,
             "app_version": "0.2.1", "android_version_code": 2001001,
             "required_adblock_id": REQUIRED_ADBLOCK_ID,
-            "integration_commit": BUILT_HEAD_SHA,
+            "integration_commit": BUILD_MERGE_SHA,
             "apk_sha256": digest,
         }
 
     def test_only_specific_successful_android_job_on_failed_overall_run(self):
         verify_source_metadata(*self.source_objects())
-        run, job, artifact = self.source_objects()
+        run, job, artifact, merge_commit = self.source_objects()
         job["conclusion"] = "failure"
         with self.assertRaisesRegex(ValueError, "Android compilation"):
-            verify_source_metadata(run, job, artifact)
+            verify_source_metadata(run, job, artifact, merge_commit)
 
     def test_rejects_artifact_drift_other_repo_other_commit_or_digest(self):
         for category, name, value in (
@@ -70,12 +76,25 @@ class SignCandidateTests(unittest.TestCase):
             ("artifact", "id", 1),
             ("artifact", "digest", "sha256:" + "0" * 64),
             ("artifact", "expired", True),
+            ("merge_commit", "sha", "0" * 40),
         ):
             with self.subTest(category=category, name=name):
-                run, job, artifact = self.source_objects()
-                {"run": run, "job": job, "artifact": artifact}[category][name] = value
+                run, job, artifact, merge_commit = self.source_objects()
+                {"run": run, "job": job, "artifact": artifact,
+                 "merge_commit": merge_commit}[category][name] = value
                 with self.assertRaises(ValueError):
-                    verify_source_metadata(run, job, artifact)
+                    verify_source_metadata(run, job, artifact, merge_commit)
+
+    def test_original_ci_merge_sha_is_not_pr_head_and_parents_are_pinned(self):
+        self.assertNotEqual(BUILD_MERGE_SHA, BUILT_HEAD_SHA)
+        run, job, artifact, merge_commit = self.source_objects()
+        merge_commit["parents"][0]["sha"] = "0" * 40
+        with self.assertRaisesRegex(ValueError, "parents"):
+            verify_source_metadata(run, job, artifact, merge_commit)
+        run, job, artifact, merge_commit = self.source_objects()
+        run["pull_requests"][0]["head"]["sha"] = "0" * 40
+        with self.assertRaisesRegex(ValueError, "head SHA"):
+            verify_source_metadata(run, job, artifact, merge_commit)
 
     def test_rejects_binary_or_provenance_drift(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -144,6 +163,8 @@ class SignCandidateTests(unittest.TestCase):
         self.assertNotIn("build_titanium_prototype.sh", workflow)
         self.assertIn("12204054700", workflow)
         self.assertIn("39225095884", workflow)
+        self.assertIn("36a1953e25d7016a9b8b4bb5cd48442c28d8d74b", workflow)
+        self.assertIn("--merge-commit", workflow)
         self.assertIn("apksigner", workflow)
         self.assertIn("UNVERIFIED", workflow)
         self.assertIn("retention-days: 30", workflow)
