@@ -43,7 +43,7 @@ def stage(workspace: Path) -> None:
         inputs = {}
         for relative in repositories:
             repository = source / relative
-            if git(repository, 'status', '--porcelain', '-uno').strip():
+            if git(repository, 'status', '--porcelain', '-uno', '--', '.').strip():
                 raise ValueError(f'Subproject has edits before the driver: {relative}')
             inputs[relative] = head(repository)
         arcore = source / 'third_party/arcore-android-sdk-client/AndroidManifest_basesplit.xml'
@@ -79,6 +79,12 @@ def stage(workspace: Path) -> None:
             repository = source / relative
             if relative == 'titanium':
                 git(repository, 'add', '-f', '--', *['dist/' + name for name in expected_assets], env=env)
+            top = Path(git(repository, 'rev-parse', '--show-toplevel').decode().strip()).resolve()
+            if top != repository.resolve():
+                # Titanium's chromium_src directory is tracked by the root
+                # Chromium repository; only actual nested Git checkouts get
+                # their own commit. Its assets remain staged for the root.
+                continue
             git(repository, 'add', '-u', '--', env=env)
             difference = git(repository, 'diff', '--cached', '--binary')
             if difference:
