@@ -147,7 +147,12 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
             library.mkdir(); legacy.mkdir()
             fixture = media_fixture or executable.parents[2] / 'media/test/data/bear-320x240.webm'
             shutil.copyfile(fixture, library / 'sample.webm')
+            subtitle = library / 'saved-captions.srt'
+            original_subtitle = '1\r\n00:00:00,000 --> 00:00:10,000\r\n저장된 외부 자막\r\n'.encode('utf-16')
+            subtitle.write_bytes(original_subtitle)
+            (library / 'sample.srt').write_text('1\n00:00:00,000 --> 00:00:10,000\nFallback subtitle\n', encoding='utf-8')
             old_library = json.dumps({'version': 1, 'items': {'sample.webm': {
+                'subtitlePath': str(subtitle),
                 'title': 'Saved fixture', 'lastPositionMs': 1000}}}).encode()
             old_preferences = json.dumps({'flutter.bookmarks': ['https://example.test/bookmark'],
                 'flutter.history': ['https://example.test/visit'], 'flutter.update_auto_check': False}).encode()
@@ -235,6 +240,8 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                     eventually(lambda: cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\')?.textContent === "Renamed fixture"'))
                     cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\').click()')
                     eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player')"))
+                    checks['native_saved_external_subtitle_loaded'] = eventually(lambda: cdp.evaluate(page_session,
+                        'document.querySelector("video").textTracks[0]?.cues?.[0]?.getCueAsHTML().textContent')) == '저장된 외부 자막'
                     cdp.evaluate(page_session, "document.querySelector('video').pause()")
                     checks['native_player_resume_from_legacy'] = eventually(lambda: cdp.evaluate(page_session,
                         "document.querySelector('video').readyState >= 1 && Math.abs(document.querySelector('video').currentTime - 1) < 0.4"))
@@ -254,6 +261,7 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                     cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/downloaded.webm"]\').click()')
                     checks['native_downloaded_video_player'] = eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player') && document.querySelector('video').readyState >= 1"))
                     checks['original_library_unchanged'] = (library / 'library.json').read_bytes() == old_library
+                    checks['original_subtitle_unchanged'] = subtitle.read_bytes() == original_subtitle
                     checks['original_preferences_unchanged'] = (legacy / 'shared_preferences.json').read_bytes() == old_preferences
                     if not all(checks.values()):
                         raise RuntimeError('One or more controlled native smoke checks failed')

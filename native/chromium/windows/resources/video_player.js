@@ -105,12 +105,80 @@ const loop = button(video.loop ? '반복 켜짐' : '반복 꺼짐', () => {
 });
 video.style.objectFit = options.fit === 'cover' ? 'cover' : 'contain';
 button('화면 맞춤', () => {video.style.objectFit = video.style.objectFit === 'cover' ? 'contain' : 'cover';});
-const captions = () => {
-  for (const track of video.textTracks) track.mode = track.mode === 'showing' ? 'disabled' : 'showing';
+const captionChoice = document.createElement('select');
+captionChoice.setAttribute('aria-label', '자막 선택');
+const selectCaption = index => {
+  [...video.textTracks].forEach((track, current) => {track.mode = current === index ? 'showing' : 'disabled';});
+  captionChoice.value = String(index);
 };
-const captionButton = button('자막', captions);
-captionButton.disabled = video.textTracks.length === 0;
-video.textTracks.addEventListener('addtrack', () => {captionButton.disabled = false;});
+const refreshCaptions = () => {
+  captionChoice.replaceChildren();
+  for (const [index, label] of [[-1, '자막 끄기'], ...[...video.textTracks].map((track, index) => [index, track.label || track.language || `자막 ${index + 1}`])]) {
+    const option = document.createElement('option'); option.value = index; option.textContent = label; captionChoice.append(option);
+  }
+  captionChoice.value = String([...video.textTracks].findIndex(track => track.mode === 'showing'));
+  captionChoice.disabled = video.textTracks.length === 0;
+};
+const captions = () => {
+  const current = [...video.textTracks].findIndex(track => track.mode === 'showing');
+  selectCaption(current < 0 && video.textTracks.length ? 0 : -1);
+};
+button('자막', captions);
+captionChoice.addEventListener('change', () => selectCaption(Number(captionChoice.value)));
+toolbar.append(captionChoice);
+video.textTracks.addEventListener('addtrack', refreshCaptions);
+video.textTracks.addEventListener('removetrack', refreshCaptions);
+video.textTracks.addEventListener('change', refreshCaptions);
+refreshCaptions();
+const subtitleVtt = subtitle => {
+  const text = subtitle.text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  if (subtitle.format === 'vtt') return /^WEBVTT(?:[ \t\n]|$)/.test(text) ? text : '';
+  const literal = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const timestamp = value => {
+    const match = /^(\d{1,3}):(\d{2}):(\d{2})[,.](\d{1,3})$/.exec(value.trim());
+    if (!match || Number(match[2]) > 59 || Number(match[3]) > 59) return '';
+    return `${match[1].padStart(2, '0')}:${match[2]}:${match[3]}.${match[4].padEnd(3, '0')}`;
+  };
+  const cues = [];
+  if (subtitle.format === 'srt') {
+    for (const block of text.split(/\n[ \t]*\n/)) {
+      const lines = block.split('\n');
+      if (/^\d+$/.test(lines[0]?.trim())) lines.shift();
+      const times = lines.shift()?.split('-->');
+      if (!times || times.length !== 2) continue;
+      const start = timestamp(times[0]), end = timestamp(times[1]);
+      if (start && end && lines.length) cues.push(`${start} --> ${end}\n${literal(lines.join('\n'))}`);
+    }
+  } else if (subtitle.format === 'ass') {
+    // Preserve dialogue timing/text. ASS positioning, fonts and effects are not applied.
+    let events = false, fields = [];
+    for (const line of text.split('\n')) {
+      if (/^\[.*\]$/.test(line.trim())) {events = line.trim().toLowerCase() === '[events]'; continue;}
+      if (!events) continue;
+      if (/^Format:/i.test(line)) {fields = line.slice(line.indexOf(':') + 1).split(',').map(x => x.trim().toLowerCase()); continue;}
+      if (!/^Dialogue:/i.test(line) || fields.at(-1) !== 'text') continue;
+      const parts = line.slice(line.indexOf(':') + 1).split(',');
+      if (parts.length < fields.length) continue;
+      const start = timestamp(parts[fields.indexOf('start')] || ''), end = timestamp(parts[fields.indexOf('end')] || '');
+      const dialogue = parts.slice(fields.length - 1).join(',').replace(/\{[^}]*\}/g, '').replace(/\\[Nn]/g, '\n').replace(/\\h/g, ' ');
+      if (start && end && dialogue) cues.push(`${start} --> ${end}\n${literal(dialogue)}`);
+    }
+  }
+  return cues.length ? 'WEBVTT\n\n' + cues.join('\n\n') + '\n' : '';
+};
+if (typeof options.subtitle?.text === 'string' && options.subtitle.text.length <= 2 * 1024 * 1024) {
+  const vtt = subtitleVtt(options.subtitle);
+  if (vtt) {
+    const track = document.createElement('track'); track.kind = 'subtitles';
+    track.label = options.subtitle.label || '외부 자막'; track.default = true;
+    const blob = URL.createObjectURL(new Blob([vtt], {type: 'text/vtt;charset=utf-8'}));
+    track.src = blob;
+    track.addEventListener('load', () => {selectCaption([...video.textTracks].indexOf(track.track)); refreshCaptions();});
+    track.addEventListener('error', () => {status.textContent = '외부 자막을 읽지 못했습니다.'; URL.revokeObjectURL(blob);});
+    video.append(track); track.track.mode = 'showing';
+    window.addEventListener('pagehide', () => URL.revokeObjectURL(blob), {once: true});
+  } else status.textContent = '외부 자막의 형식을 읽지 못했습니다.';
+}
 const pip = button('작은 화면', async () => {
   try {if (document.pictureInPictureElement) await document.exitPictureInPicture(); else await video.requestPictureInPicture();}
   catch {status.textContent = '현재 기기 또는 영상에서는 작은 화면 재생을 사용할 수 없습니다.';}

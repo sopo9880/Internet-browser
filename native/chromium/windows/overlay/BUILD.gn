@@ -35,9 +35,9 @@ source_set("legacy_data") {
 }
 
 source_set("video_player") {
-  sources = [ "video_player.cc", "video_player.h", "video_metadata.h", "resources.h" ]
+  sources = [ "video_player.cc", "video_player.h", "video_subtitles.cc", "video_subtitles.h", "video_metadata.h", "resources.h" ]
   public_deps = [ "//content/public/browser", "//base" ]
-  deps = [ "//chrome/common", "//content/public/common", "//ui/base:types", "//url" ]
+  deps = [ "//base:i18n", "//chrome/common", "//content/public/common", "//net", "//ui/base:types", "//url" ]
 }
 
 source_set("updater") {

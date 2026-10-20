@@ -62,11 +62,21 @@ def run(browser_exe: Path, video: Path, work: Path, report: Path) -> dict:
                             raise RuntimeError(str(response['exceptionDetails']))
                         return response['result'].get('value')
                     title = '<img src=x onerror=alert(1)> saved title'
-                    options = {'title': title, 'lastPositionMs': 1000, 'hasPrevious': False, 'hasNext': True}
+                    subtitle_text = '한국어 자막 <img src=x onerror=alert(1)>'
+                    options = {'title': title, 'lastPositionMs': 1000, 'hasPrevious': False, 'hasNext': True,
+                               'subtitle': {'format': 'srt', 'label': '외부 SRT',
+                                            'text': '1\r\n00:00:00,000 --> 00:00:10,000\r\n' + subtitle_text + '\r\n'}}
                     evaluate('globalThis.__ibMessages = []; console.info = message => __ibMessages.push(message);')
                     evaluate('(() => {const options = ' + json.dumps(options) + ';\n' + SCRIPT.read_text(encoding='utf-8') + '\n})()')
                     checks['title_is_literal'] = evaluate('document.querySelector(".ib-title").textContent') == title
                     checks['resume_position'] = evaluate('Math.abs(document.querySelector("video").currentTime - 1) < 0.2')
+                    checks['srt_loaded_as_real_text_track'] = eventually(lambda: evaluate('document.querySelector("video").textTracks[0]?.cues?.length === 1'))
+                    checks['subtitle_text_is_literal'] = evaluate('document.querySelector("video").textTracks[0].cues[0].getCueAsHTML().textContent') == subtitle_text
+                    checks['subtitle_cue_timing'] = evaluate('document.querySelector("video").textTracks[0].cues[0].startTime === 0 && document.querySelector("video").textTracks[0].cues[0].endTime === 10')
+                    evaluate("document.querySelector('select[aria-label=\"자막 선택\"]').value = '-1'; document.querySelector('select[aria-label=\"자막 선택\"]').dispatchEvent(new Event('change'))")
+                    checks['subtitle_can_be_disabled'] = evaluate('document.querySelector("video").textTracks[0].mode === "disabled"')
+                    evaluate("window.dispatchEvent(new KeyboardEvent('keydown', {key:'c'}))")
+                    checks['subtitle_shortcut_restores_track'] = evaluate('document.querySelector("video").textTracks[0].mode === "showing"')
                     checks['playlist_bounds'] = evaluate("[...document.querySelectorAll('button')].find(x => x.textContent === '이전').disabled && ![...document.querySelectorAll('button')].find(x => x.textContent === '다음').disabled")
                     evaluate("document.querySelector('video').pause(); document.querySelector('select').value = '1.5'; document.querySelector('select').dispatchEvent(new Event('change'))")
                     checks['playback_rate'] = evaluate('document.querySelector("video").playbackRate === 1.5')
@@ -86,6 +96,19 @@ def run(browser_exe: Path, video: Path, work: Path, report: Path) -> dict:
                     screenshot = cdp.call('Page.captureScreenshot', {'format': 'png'}, session=session)
                     (work / 'video-player-render.png').write_bytes(base64.b64decode(screenshot['data']))
                     checks['controls_not_covered'] = evaluate("(() => {const video=document.querySelector('video').getBoundingClientRect(), controls=document.querySelector('.ib-controls').getBoundingClientRect();return video.bottom <= controls.top + 1 && controls.bottom <= innerHeight + 1 && video.height > 0;})()")
+                    for subtitle_format, subtitle_data, expected in [
+                        ('vtt', 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nVTT 자막\n', 'VTT 자막'),
+                        ('ass', '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,{\\b1}ASS 자막\\N둘째 줄,쉼표\n', 'ASS 자막\n둘째 줄,쉼표'),
+                    ]:
+                        cdp.call('Page.navigate', {'url': media.as_uri() + '?' + subtitle_format}, session=session)
+                        eventually(lambda: cdp.evaluate(session, "document.querySelector('video')?.readyState >= 1 && !document.querySelector('#internet-browser-player')"))
+                        frame = cdp.call('Page.getFrameTree', session=session)['frameTree']['frame']['id']
+                        context = cdp.call('Page.createIsolatedWorld', {'frameId': frame,
+                            'worldName': 'internet-browser-player-test'}, session=session)['executionContextId']
+                        subtitle_options = {'subtitle': {'format': subtitle_format, 'text': subtitle_data}}
+                        evaluate('(() => {const options = ' + json.dumps(subtitle_options) + ';\n' + SCRIPT.read_text(encoding='utf-8') + '\n})()')
+                        checks[subtitle_format + '_loaded_as_real_text_track'] = eventually(lambda: evaluate('document.querySelector("video").textTracks[0]?.cues?.length === 1'))
+                        checks[subtitle_format + '_cue_text'] = evaluate('document.querySelector("video").textTracks[0].cues[0].getCueAsHTML().textContent') == expected
                     if not all(checks.values()):
                         raise RuntimeError('One or more player behavior checks failed')
                 finally:

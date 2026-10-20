@@ -48,7 +48,7 @@ inline void AddVideoMetadata(base::DictValue& item, const std::string& name,
   item.Set("name", name);
   item.Set("lastPositionMs", legacy ? VideoPosition(*legacy) : 0);
   if (legacy) {
-    for (const char* field : {"title", "quality", "sourcePage"}) {
+    for (const char* field : {"title", "quality", "sourcePage", "subtitlePath"}) {
       if (const auto* value = legacy->FindString(field); value && value->size() <= 4096)
         item.Set(field, *value);
     }

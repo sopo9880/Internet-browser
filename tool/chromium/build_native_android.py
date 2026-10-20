@@ -35,6 +35,7 @@ PHASE_RECORDS = ('source-preparation.json', 'titanium-patches.json',
 PRODUCT_OBJECTS = tuple('obj/chrome/browser/internet_browser/' + target + '/' + source + '.o'
     for target, source in (('transport', 'transport'), ('legacy_data', 'legacy_data'),
                           ('ui', 'internet_browser_ui'), ('video_player', 'video_player'),
+                          ('video_player', 'video_subtitles'),
                           ('updater', 'updater'), ('video_library', 'video_downloads')))
 
 

@@ -137,7 +137,7 @@ are read through until a native position exists. Controls include resume,
 playlist continuation, rate, volume, loop, fit, lock, keyboard seek, temporary
 2x playback, media-session actions, fullscreen and a capability-gated PiP button.
 
-The four Windows product translation units passed pinned compiler syntax checks.
+The seven current Windows product translation units pass pinned compiler syntax checks.
 `check_video_player.py` exercised a real WebM media document in Chrome
 155.0.8059.85 using a temporary profile: playback, resume, percent seeking, lock,
 rate, loop/fit, position reporting, playlist choices, literal metadata text and
@@ -229,7 +229,7 @@ All ten legacy filename extensions remain listed; this is not proof that every
 container/codec plays in Chromium.
 
 Incognito library views can read existing metadata but do not persist new catalog
-entries, edited titles or playback positions to the normal profile. Six current
+entries, edited titles or playback positions to the normal profile. Seven current
 Windows product translation units pass pinned-compiler syntax checks. Twelve
 renderer-flow checks pass with the native service stubbed, including refresh and
 content-URI forwarding. The native smoke now includes a real loopback video
@@ -254,6 +254,24 @@ compiler writes. A pinned-7za synthetic archive check and path-rejection tests
 passed. The real installer archive has not completed, so the packaged app has
 not been launched by this new path; OS installer execution is also separate.
 The runtime fixture/media smoke continues to keep AdBlock acceptance false.
+
+The local player now reads the legacy `subtitlePath` first, then adjacent
+same-basename SRT/VTT/ASS files, on a worker. Reads are limited to 2 MiB local
+regular files; network/device paths are excluded. UTF-8, BOM-marked UTF-16 and
+strict Windows-949 decoding are supported. The asynchronous injection checks
+the original document's lifetime before adding the player. Original subtitles
+and library metadata are never rewritten. Android content-URI videos cannot
+automatically enumerate adjacent subtitle documents by this local-file path.
+
+The renderer converts SRT and basic ASS dialogue timing/text to WebVTT, loads
+an actual browser TextTrack and offers one-track selection/off and the C shortcut.
+ASS fonts, positioning and effects are not reproduced. Twenty real Chrome 155
+renderer checks pass, including Korean text, literal markup, cue timing,
+SRT/VTT/ASS loading and track toggling; the screenshot was visually inspected.
+All seven current Windows translation units pass the pinned compiler's syntax
+check. These are not native product or device acceptance. The native executable
+smoke now checks a saved UTF-16 subtitle path taking priority over a neighboring
+SRT and verifies its original bytes remain unchanged; that test is pending.
 
 ## Required before release
 

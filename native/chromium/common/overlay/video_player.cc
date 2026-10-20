@@ -13,12 +13,15 @@
 #include "base/task/thread_pool.h"
 #include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
+#include "chrome/browser/internet_browser/video_subtitles.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/weak_document_ptr.h"
 #include "content/public/common/referrer.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
@@ -49,6 +52,15 @@ class VideoPlayer : public base::SupportsUserData::Data,
     options.Merge(player_options_.Clone());
     options.Set("hasPrevious", index_ > 0);
     options.Set("hasNext", index_ + 1 < videos_.size());
+    base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
+        base::BindOnce(&LoadVideoSubtitles, std::move(options)),
+        base::BindOnce(&VideoPlayer::Inject, weak_factory_.GetWeakPtr(),
+                       frame->GetWeakDocumentPtr()));
+  }
+  void Inject(content::WeakDocumentPtr document, base::DictValue options) {
+    auto* frame = document.AsRenderFrameHostIfValid();
+    if (!frame || !armed_ || frame != web_contents()->GetPrimaryMainFrame() ||
+        frame->GetLastCommittedURL() != CurrentUrl()) return;
     std::string json;
     if (!base::JSONWriter::Write(options, &json))
       return;
@@ -118,6 +130,7 @@ class VideoPlayer : public base::SupportsUserData::Data,
   base::FilePath state_file_;
   scoped_refptr<base::SequencedTaskRunner> writer_;
   bool armed_ = true;
+  base::WeakPtrFactory<VideoPlayer> weak_factory_{this};
 };
 }  // namespace
 bool InstallVideoPlayer(content::WebContents* contents, base::DictValue library,
