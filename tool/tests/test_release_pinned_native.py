@@ -49,6 +49,16 @@ class PinnedNativeReleaseTests(unittest.TestCase):
         version = "name: internet_browser\nversion: 0.2.1+1\n"
         return run, artifact, report, sums, version
 
+    def test_release_cli_imports_as_module_without_secrets(self):
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "-m", "tool.release_pinned_native", "--help"],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertIn("--artifact-dir", result.stdout)
+        self.assertIn("--apksigner", result.stdout)
+
     def test_original_verified_candidate_is_allowed_for_release(self):
         validate_source(*self.fixtures())
 
@@ -92,7 +102,8 @@ class PinnedNativeReleaseTests(unittest.TestCase):
         flow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("39334182017", flow)
         self.assertIn("12226545642", flow)
-        self.assertIn("tool/release_pinned_native.py", flow)
+        self.assertIn("python3 -m tool.release_pinned_native", flow)
+        self.assertNotIn("python3 tool/release_pinned_native.py", flow)
         self.assertIn("docs/releases/v0.2.1.md", flow)
 
 
