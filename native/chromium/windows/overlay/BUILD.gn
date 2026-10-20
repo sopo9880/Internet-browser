@@ -1,0 +1,17 @@
+source_set("transport") {
+  sources = [ "transport.cc", "transport.h" ]
+  public_deps = [ "//base" ]
+  deps = [ "//chrome/common" ]
+  libs = [ "ws2_32.lib" ]
+}
+
+source_set("ui") {
+  sources = [ "internet_browser_ui.cc", "internet_browser_ui.h", "resources.h" ]
+  public_deps = [ "//content/public/browser" ]
+  deps = [
+    ":transport",
+    "//base",
+    "//chrome/browser/profiles:profile",
+    "//content/public/common",
+  ]
+}
