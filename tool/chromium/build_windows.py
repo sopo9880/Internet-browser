@@ -71,7 +71,8 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
         'GIT_CONFIG_VALUE_0': 'true', 'GIT_CONFIG_KEY_1': 'core.autocrlf',
         'GIT_CONFIG_VALUE_1': 'false',
     })
-    with workspace_lock(workspace):
+    from windows_build_power import keep_awake
+    with workspace_lock(workspace), keep_awake():
         depot = workspace / 'depot_tools'
         source = workspace / 'src'
         if not (depot / '.git').exists():
