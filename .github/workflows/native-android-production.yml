@@ -1,0 +1,77 @@
+name: Build and sign native Android for release (no publication)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: internet-browser-formal-native-android
+  cancel-in-progress: false
+jobs:
+  trusted_main:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check signing policy without secrets
+        run: python3 -m unittest discover -s tool/tests -p test_sign_native_android.py -v
+  native_source:
+    needs: trusted_main
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/native-android.yml
+    with:
+      phase: apk
+      jobs: '2'
+  sign_android:
+    needs: native_source
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install the pinned Android signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'build-tools;37.0.0'
+          TOOLS="$ANDROID_SDK_ROOT/build-tools/37.0.0"
+          test -x "$TOOLS/aapt2" && test -x "$TOOLS/apksigner" && test -x "$TOOLS/zipalign"
+          echo "NATIVE_ANDROID_TOOLS=$TOOLS" >> "$GITHUB_ENV"
+      - name: Reuse this run's exact native APK (no rebuild)
+        uses: actions/download-artifact@v4
+        with:
+          name: native-android-v022-apk-not-release
+          path: build/native-android
+      - name: Verify source APK and provenance before exposing keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m tool.chromium.sign_native_android check-source \
+            --source build/native-android --aapt2 "$NATIVE_ANDROID_TOOLS/aapt2" \
+            --apksigner "$NATIVE_ANDROID_TOOLS/apksigner"
+      - name: Sign once with the existing application certificate
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 -m tool.chromium.sign_native_android sign \
+            --source build/native-android --output dist \
+            --aapt2 "$NATIVE_ANDROID_TOOLS/aapt2" --apksigner "$NATIVE_ANDROID_TOOLS/apksigner" \
+            --zipalign "$NATIVE_ANDROID_TOOLS/zipalign"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android-production-signed
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30

@@ -184,6 +184,23 @@ product/release versions. Production signing/publication wiring remains required
 The old Flutter release path now permits only v0.2.1, so a v0.2.2 version change
 cannot accidentally publish the previous implementation.
 
+The formal Android pipeline is now defined in `native-android-production.yml`.
+It is manual and main-only, calls the native APK source builder once, then reuses
+that run's artifact on a GitHub-hosted signing job. Source jobs receive no
+production signing secrets. The signer checks the exact integration commit/tree,
+package/version, product-source hashes, transport payload and disposable signer
+before decoding the existing key. It checks the published application's original
+certificate and all non-signature ZIP file contents after signing, with 16 KiB
+ZIP alignment. The temporary private key is held outside the checkout and removed
+on success or ordinary failure; output provenance does not claim runtime/release
+acceptance. No publication or rebuild occurs in the signing step.
+
+Six signing policy/orchestration tests pass using synthetic ZIP/key fixtures and
+mocked signing tools, including wrong-certificate/tampered-payload rejection,
+key cleanup and refusal to overwrite an existing release APK. These do not prove
+a real APK is signed. The production workflow remains unexecuted: the migration
+is not merged and native/release version metadata does not yet match.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;

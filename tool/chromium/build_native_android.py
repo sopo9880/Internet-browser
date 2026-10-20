@@ -187,6 +187,7 @@ def build(workspace: Path, stage: Path, version_code: int, jobs: int,
                 (stage / 'source-records').mkdir(exist_ok=True)
                 shutil.copyfile(workspace / name, stage / 'source-records' / name)
             shutil.copyfile(workspace / 'transport/transport-provenance.json', stage / 'transport-provenance.json')
+            shutil.copyfile(workspace / 'transport/libciadpi.so', stage / 'libciadpi.so')
             print('Native Android phase complete. APK compilation:', report['compiled'], '; runtime/release acceptance remains required.', flush=True)
             return report
 
