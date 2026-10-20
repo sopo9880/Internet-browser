@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Internet Browser native runtime smoke fixture",
+  "version": "1.0.0",
+  "background": { "service_worker": "internet_browser_smoke_worker.js" },
+  "action": { "default_popup": "popup.html" },
+  "permissions": ["declarativeNetRequest", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "declarative_net_request": {
+    "rule_resources": [{ "id": "controlled_test", "enabled": true, "path": "rules.json" }]
+  }
+}

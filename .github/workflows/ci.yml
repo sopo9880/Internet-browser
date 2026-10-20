@@ -147,20 +147,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate native source safeguards
-        shell: powershell
+        shell: cmd
         run: python -m unittest discover -s tool/tests -p test_windows_chromium.py -v
       - name: Build Internet Browser from pinned Chromium source
-        shell: powershell
+        id: native_build
+        shell: cmd
         run: |
-          python -m pip install Pillow==11.3.0
-          if (-not $env:NATIVE_WORKSPACE) {
-            $env:NATIVE_WORKSPACE = "$env:RUNNER_TEMP\internet-browser-native-win"
-          }
-          ./tool/chromium/build_windows.ps1 -Workspace $env:NATIVE_WORKSPACE -Jobs 3
-          New-Item -ItemType Directory build/native-windows -Force | Out-Null
-          foreach ($file in @('chrome.7z', 'mini_installer.exe', 'native-provenance.json')) {
-            Copy-Item "$env:NATIVE_WORKSPACE\src\out\InternetBrowser\$file" build/native-windows/
-          }
+          python -m pip install -r tool/chromium/requirements-windows.txt || exit /b 1
+          if not defined NATIVE_WORKSPACE set "NATIVE_WORKSPACE=%RUNNER_TEMP%\internet-browser-native-win"
+          python tool/chromium/build_windows.py --workspace "%NATIVE_WORKSPACE%" --jobs 3 --stage build/native-windows
+      - name: Controlled native MV3 fixture smoke (not AdBlock acceptance)
+        shell: cmd
+        env:
+          NATIVE_CHROME_EXE: ${{ steps.native_build.outputs.chrome_exe }}
+        run: python tool/chromium/smoke_windows.py --exe "%NATIVE_CHROME_EXE%" --report build/native-windows/windows-smoke.json --work build/native-windows-smoke
       - uses: actions/upload-artifact@v4
         with:
           name: native-windows-v022-development-not-release
