@@ -100,7 +100,7 @@ Java checks do not establish an integrated or release-ready Android APK.
 
 The dedicated Linux cache has now completed source synchronization and hooks,
 291 Vanadium patches, and Titanium's pinned driver (88 changed root files).
-The source overlay applied 1,247 product files and remapped 1,273 translation
+The source overlay applied 1,249 product files and remapped 1,273 translation
 fingerprints. Actual Android GN generation succeeded with 98,385 targets from
 4,981 build files. None of this is an Android browser compilation result.
 
@@ -109,6 +109,22 @@ ELF inspection confirmed `/system/bin/linker64`, Android libc/libdl, 16 KiB load
 alignment, RELRO and a non-executable stack. Device execution remains unverified.
 The exact product overlay can be removed only after every owned file hash and
 source revision matches, allowing controlled incremental source updates.
+
+The native hub now embeds the exact pinned Chromium and ByeDPI notices on
+Windows, plus Titanium and Vanadium license/exception texts on Android.
+The notice manifest records revisions and byte hashes, which are checked while
+generating the native resource header. Git preserves the notice bytes across
+platforms. Both versions retain access to `chrome://credits/`. Windows source
+syntax checks and Android GN generation passed with these pages included;
+the runtime smoke check must still verify that the built page is served.
+Corresponding source distribution/reconstruction remains a separate release task.
+
+Windows artwork review also found remaining upstream images in
+`chrome/app/theme/chromium`, the scaled theme directories, Windows tiles and
+`components/resources`. Replacing the main executable icon alone does not finish
+product branding. These resources must be generated from the existing parcel
+artwork before the final rebuild, without changing third-party search/provider
+logos or attribution.
 
 ## Required before release
 
