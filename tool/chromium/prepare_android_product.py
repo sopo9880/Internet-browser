@@ -60,7 +60,7 @@ def product_path(checkout: Path, relative: str) -> Path:
         'chrome/browser/internet_browser/libciadpi.so',
         'chrome/browser/internet_browser/LICENSE-byeDPI.txt',
     }
-    resource = re.fullmatch(r'(?:chrome|components)/[A-Za-z0-9_./-]+\.(?:grd|grdp|xtb)', relative)
+    resource = re.fullmatch(r'(?:chrome|components|ui)/[A-Za-z0-9_./-]+\.(?:grd|grdp|xtb)', relative)
     icon = re.fullmatch(r'chrome/android/java/res_titanium_base/[A-Za-z0-9_/-]+\.(?:png|xml)', relative)
     owned = re.fullmatch(r'chrome/browser/internet_browser/[a-z_]+\.(?:cc|h)', relative)
     if relative not in allowed and not (resource or icon or owned):
@@ -219,7 +219,7 @@ def prepare(checkout: Path, transport: Path) -> dict:
 
     mapping: dict[str, str] = {}
     # Resource XML only: source identifiers and upstream copyright stay intact.
-    for directory in ('chrome', 'components'):
+    for directory in ('chrome', 'components', 'ui'):
         for pattern in ('*.grd', '*.grdp'):
             for path in sorted((checkout / directory).rglob(pattern)):
                 before = path.read_text(encoding='utf-8')
@@ -231,7 +231,7 @@ def prepare(checkout: Path, transport: Path) -> dict:
                         raise ValueError('Ambiguous Android translation fingerprint')
                     mapping[old] = new
                 changes[path] = after.encode()
-    for directory in ('chrome', 'components'):
+    for directory in ('chrome', 'components', 'ui'):
         for path in sorted((checkout / directory).rglob('*.xtb')):
             before = path.read_text(encoding='utf-8')
             after = remap_translation_ids(brand(before, xtb=True), mapping)
