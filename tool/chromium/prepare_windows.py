@@ -192,6 +192,24 @@ def remove_overlay(checkout: Path) -> None:
     stamp.unlink()
 
 
+def resource_header() -> bytes:
+    resources = ['#ifndef CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
+                 '#define CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
+                 'namespace internet_browser {']
+    for filename, constant in [('index.html', 'kIndexHtml'), ('app.js', 'kAppJs'),
+                               ('style.css', 'kStyleCss')]:
+        content = (ROOT / 'native/chromium/windows/resources' / filename).read_text(encoding='utf-8')
+        if ')IBRESOURCE"' in content:
+            raise ValueError('Unexpected raw-string delimiter in native resources')
+        resources.append(f'inline constexpr char {constant}[] = R"IBRESOURCE({content})IBRESOURCE";')
+    logo = (ROOT / 'assets/icon/parcel.svg').read_text(encoding='utf-8')
+    if ')IBRESOURCE"' in logo:
+        raise ValueError('Unexpected raw-string delimiter in product logo')
+    resources.append(f'inline constexpr char kLogoSvg[] = R"IBRESOURCE({logo})IBRESOURCE";')
+    resources.extend(['}', '#endif', ''])
+    return '\n'.join(resources).encode()
+
+
 def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
     checkout = checkout.resolve(strict=True)
     revision = subprocess.check_output(
@@ -311,21 +329,7 @@ def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
     for path in sorted((ROOT / 'native/chromium/windows/overlay').glob('*')):
         if path.is_file():
             changes['chrome/browser/internet_browser/' + path.name] = path.read_bytes()
-    resources = ['#ifndef CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
-                 '#define CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
-                 'namespace internet_browser {']
-    for filename, constant in [('index.html', 'kIndexHtml'), ('app.js', 'kAppJs'),
-                               ('style.css', 'kStyleCss')]:
-        content = (ROOT / 'native/chromium/windows/resources' / filename).read_text(encoding='utf-8')
-        if ')IBRESOURCE"' in content:
-            raise ValueError('Unexpected raw-string delimiter in native resources')
-        resources.append(f'inline constexpr char {constant}[] = R"IBRESOURCE({content})IBRESOURCE";')
-    logo = (ROOT / 'assets/icon/parcel.svg').read_text(encoding='utf-8')
-    if ')IBRESOURCE"' in logo:
-        raise ValueError('Unexpected raw-string delimiter in product logo')
-    resources.append(f'inline constexpr char kLogoSvg[] = R"IBRESOURCE({logo})IBRESOURCE";')
-    resources.extend(['}', '#endif', ''])
-    changes['chrome/browser/internet_browser/resources.h'] = '\n'.join(resources).encode()
+    changes['chrome/browser/internet_browser/resources.h'] = resource_header()
 
     # Generate the native Windows icon from this repository's existing asset.
     from PIL import Image

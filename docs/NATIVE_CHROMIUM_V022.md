@@ -74,6 +74,25 @@ These are source checks. They do not establish successful Android compilation,
 ByeDPI/media/data integration, a physical device's security verdict, or release
 readiness. The complete Android product build orchestration is still pending.
 
+The Android overlay now connects the native hub and browser-owned transport to
+startup. Its ARM64 ByeDPI executable is built with Chromium's pinned NDK 30,
+packaged in nativeLibraryDir, and includes its MIT license. A parent-death signal
+limits the child lifetime to the browser. These Android C++ paths still require
+compilation and runtime validation.
+
+Original Flutter preferences are read into an atomic snapshot without editing
+the original XML. Legacy ArrayList and Arrays-backed string lists are decoded
+with a bounded format reader that never instantiates serialized classes. Real
+Java serialization interoperability/rejection checks passed, and the snapshot
+helpers compiled against the pinned Android SDK 37 jar. Lightweight PR CI runs
+the plain Java codec checks. Native bookmarks import is opt-in; history keeps
+its original URL-only representation without invented visit times.
+
+The Android video listing reads the original app_flutter/Videos directory.
+Custom DPI controls, applying legacy settings, full media player/library parity,
+and updater integration remain required. Source wiring and Java checks do not
+establish an integrated or release-ready Android APK.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;

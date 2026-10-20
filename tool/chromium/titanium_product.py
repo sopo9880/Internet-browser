@@ -138,7 +138,10 @@ def prepare_source(
             'gclient runhooks\n')
         build = replace_exact(build, 'source $SCRIPT_DIR/patch.sh\n',
             'source $SCRIPT_DIR/patch.sh\n'
-            f'python3 {shlex.quote(str(script))} --checkout "$PWD"\n')
+            f'python3 {shlex.quote(str(script.with_name("build_android_transport.py")))} '
+            '--checkout "$PWD" --workspace "$SCRIPT_DIR/../transport"\n'
+            f'python3 {shlex.quote(str(script))} --checkout "$PWD" '
+            '--transport "$SCRIPT_DIR/../transport/libciadpi.so"\n')
     return args, build
 
 

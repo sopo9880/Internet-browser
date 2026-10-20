@@ -11,13 +11,14 @@ import io
 import json
 from pathlib import Path
 import re
+import struct
 import subprocess
 import xml.etree.ElementTree as ET
 
 try:
-    from .prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids
+    from .prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids, replace_once, resource_header
 except ImportError:
-    from prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids
+    from prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids, replace_once, resource_header
 
 
 def brand(text: str, *, xtb: bool = False) -> str:
@@ -44,7 +45,106 @@ def fingerprints(checkout: Path, before: str, after: str) -> dict[str, str]:
     return translation_id_map(checkout, wrap(before), wrap(after))
 
 
-def prepare(checkout: Path) -> dict:
+def native_changes(checkout: Path, transport: Path) -> dict[Path, bytes]:
+    binary = transport.read_bytes()
+    provenance = json.loads(transport.with_name('transport-provenance.json').read_text(encoding='utf-8'))
+    if (binary[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<HH', binary, 16) != (3, 183)
+            or provenance.get('sha256') != hashlib.sha256(binary).hexdigest()
+            or provenance.get('source_revision') != '7efde1b1296eaaa187b70e951894dde17527489c'
+            or provenance.get('ndk_version') != '30.0.16248370' or not provenance.get('compiled')):
+        raise ValueError('Android-native transport provenance differs')
+    changes = native_source_changes(checkout)
+    directory = checkout / 'chrome/browser/internet_browser'
+    changes[directory / 'libciadpi.so'] = binary
+    changes[directory / 'LICENSE-byeDPI.txt'] = (ROOT / 'third_party/byedpi/LICENSE').read_bytes()
+    return changes
+
+
+def native_source_changes(checkout: Path) -> dict[Path, bytes]:
+    """Validate source anchors without applying or claiming compilation."""
+    directory = checkout / 'chrome/browser/internet_browser'
+    if directory.exists() and any(directory.iterdir()):
+        raise ValueError('Refusing an existing Android product source overlay')
+    changes = {directory / 'resources.h': resource_header()}
+    for name in ('internet_browser_ui.cc', 'internet_browser_ui.h', 'transport.h', 'legacy_data.h'):
+        changes[directory / name] = (ROOT / 'native/chromium/windows/overlay' / name).read_bytes()
+    for path in (ROOT / 'native/chromium/android/overlay').iterdir():
+        if path.is_file():
+            changes[directory / path.name] = path.read_bytes()
+    def update(relative, transform):
+        path = checkout / relative
+        changes[path] = transform(path.read_text(encoding='utf-8')).encode()
+    def main(text):
+        text = replace_once(text, '#include "chrome/browser/chrome_browser_main_android.h"\n',
+            '#include "chrome/browser/chrome_browser_main_android.h"\n'
+            '#include "chrome/browser/internet_browser/transport.h"\n')
+        text = replace_once(text, 'ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() = default;',
+            'ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() {\n'
+            '  internet_browser::StopTransport();\n}')
+        return replace_once(text, '  content::Compositor::Initialize();',
+            '  internet_browser::StartTransport();\n  content::Compositor::Initialize();')
+    update('chrome/browser/chrome_browser_main_android.cc', main)
+    update('chrome/browser/BUILD.gn', lambda text: replace_once(text,
+        '  if (is_android) {\n    sources += [\n      "after_startup_task_utils_android.cc",',
+        '  if (is_android) {\n    deps += [ "//chrome/browser/internet_browser:transport" ]\n'
+        '    sources += [\n      "after_startup_task_utils_android.cc",'))
+    def configs(text):
+        text = replace_once(text, '#include "chrome/browser/ui/webui/chrome_web_ui_configs.h"\n',
+            '#include "chrome/browser/ui/webui/chrome_web_ui_configs.h"\n'
+            '#include "chrome/browser/internet_browser/internet_browser_ui.h"\n')
+        return replace_once(text, '  auto& map = content::WebUIConfigMap::GetInstance();',
+            '  auto& map = content::WebUIConfigMap::GetInstance();\n'
+            '  map.AddWebUIConfig(std::make_unique<InternetBrowserUIConfig>());')
+    update('chrome/browser/ui/webui/chrome_web_ui_configs.cc', configs)
+    def config_build(text):
+        prefix, rest = text.split('source_set("configs") {', 1)
+        body, suffix = rest.split('source_set("webui") {', 1)
+        body = replace_once(body, '  deps = [\n',
+            '  deps = [\n    "//chrome/browser/internet_browser:ui",\n')
+        return prefix + 'source_set("configs") {' + body + 'source_set("webui") {' + suffix
+    update('chrome/browser/ui/webui/BUILD.gn', config_build)
+    payload = ('    asset_deps = [ "//chrome/browser/internet_browser:transport_payload",\n'
+               '                   "//chrome/browser/internet_browser:transport_license" ]\n'
+               '    loadable_modules = [ "$root_out_dir/libciadpi.so" ]\n')
+    def android_build(text):
+        text = replace_once(text,
+            '  chrome_public_apk_or_module_tmpl("chrome_public_apk") {\n',
+            '  chrome_public_apk_or_module_tmpl("chrome_public_apk") {\n' + payload)
+        text = replace_once(text, '  chrome_public_bundle("chrome_public_bundle") {\n',
+            '  chrome_public_bundle("chrome_public_bundle") {\n' + payload)
+        anchor = ('    chrome_public_apk_or_module_tmpl(_base_module_target_name) {\n'
+                  '      forward_variables_from(invoker,\n'
+                  '                             [\n')
+        return replace_once(text, anchor, anchor +
+            '                               "asset_deps",\n'
+            '                               "loadable_modules",\n')
+    update('chrome/android/BUILD.gn', android_build)
+    java_directory = checkout / 'chrome/android/java/src/org/chromium/chrome/browser'
+    for path in (ROOT / 'native/chromium/android/java').glob('*.java'):
+        if (java_directory / path.name).exists():
+            raise ValueError('Existing Android migration helper would be overwritten')
+        changes[java_directory / path.name] = path.read_bytes()
+    update('chrome/android/chrome_java_sources.gni', lambda text: replace_once(text,
+        '  "java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java",',
+        '  "java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java",\n'
+        '  "java/src/org/chromium/chrome/browser/InternetBrowserLegacySnapshot.java",\n'
+        '  "java/src/org/chromium/chrome/browser/LegacyStringListDecoder.java",'))
+    update('chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java',
+        lambda text: replace_once(text, '    public void onCreate() {\n        super.onCreate();\n',
+            '    public void onCreate() {\n        super.onCreate();\n'
+            '        InternetBrowserLegacySnapshot.prepare(getApplication());\n'))
+    def homepage(text):
+        text = replace_once(text,
+            '    private GURL getDefaultHomepageGurlInternal(boolean isIncognito, boolean forZeroTabs) {\n',
+            '    private GURL getDefaultHomepageGurlInternal(boolean isIncognito, boolean forZeroTabs) {\n'
+            '        if (!isIncognito) return new GURL("chrome://internet-browser/");\n')
+        return replace_once(text, 'boolean defaultEnabled = !isDesktopExceptionEnabled();',
+                            'boolean defaultEnabled = true;')
+    update('chrome/android/java/src/org/chromium/chrome/browser/homepage/HomepageManager.java', homepage)
+    return changes
+
+
+def prepare(checkout: Path, transport: Path) -> dict:
     subprocess.run(['git', '-C', str(checkout), 'merge-base', '--is-ancestor',
                     PRODUCT['chromium_revision'], 'HEAD'], check=True)
     stamp = checkout / '.internet-browser-android-overlay.json'
@@ -54,7 +154,7 @@ def prepare(checkout: Path) -> dict:
     manifest_text = manifest.read_text(encoding='utf-8')
     if 'android:extractNativeLibs="false"' not in manifest_text:
         raise ValueError('Pinned Titanium native-library manifest anchor changed')
-    changes: dict[Path, bytes] = {}
+    changes: dict[Path, bytes] = native_changes(checkout, transport)
     # A packaged executable under nativeLibraryDir needs OS extraction. It is
     # never downloaded into writable app data for execution.
     changes[manifest] = manifest_text.replace(
@@ -128,6 +228,7 @@ def prepare(checkout: Path) -> dict:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkout', type=Path, required=True)
+    parser.add_argument('--transport', type=Path, required=True)
     args = parser.parse_args()
-    result = prepare(args.checkout.resolve())
+    result = prepare(args.checkout.resolve(), args.transport.resolve())
     print(f"Prepared Android product overlay ({len(result['files'])} files). APK validation remains required.")
