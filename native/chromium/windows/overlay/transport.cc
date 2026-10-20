@@ -142,7 +142,7 @@ void StartTransport() {
                                  base::NumberToString(port ? port : 1));
   command_line->AppendSwitch("disable-quic");
   base::FilePath executable_directory;
-  if (!port || !base::PathService::Get(base::DIR_EXE, &executable_directory)) {
+  if (!port || !base::PathService::Get(base::DIR_MODULE, &executable_directory)) {
     state.status = "ByeDPI 포트 초기화 실패 · 브라우저 프록시 연결을 차단했습니다.";
     WSACleanup();
     return;

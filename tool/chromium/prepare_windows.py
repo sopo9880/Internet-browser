@@ -129,6 +129,8 @@ def overlay_path(checkout: Path, relative: str) -> Path:
         'chrome/browser/BUILD.gn',
         'chrome/browser/ui/webui/chrome_web_ui_configs.cc',
         'chrome/browser/ui/webui/BUILD.gn',
+        'chrome/installer/mini_installer/chrome.release',
+        'chrome/installer/mini_installer/BUILD.gn',
     }
     localized = re.fullmatch(r'chrome/app/resources/chromium_strings_[a-zA-Z0-9_-]+\.xtb', relative)
     owned = re.fullmatch(r'chrome/browser/internet_browser/[a-z_]+\.(?:cc|h|gn)', relative)
@@ -215,6 +217,18 @@ def prepare(checkout: Path) -> dict:
         changes[relative] = transform(path.read_text(encoding='utf-8')).encode()
 
     update('chrome/app/theme/chromium/BRANDING', brand_metadata)
+    # Version-directory payloads are moved and removed atomically by Chromium's
+    # installer. DIR_MODULE resolves beside chrome.dll in both installed and
+    # build-output layouts, so transport follows the running browser version.
+    update('chrome/installer/mini_installer/chrome.release', lambda text:
+        replace_once(text, '[GENERAL]\n', '[GENERAL]\n'
+            'tools\\ciadpi.exe: %(VersionDir)s\\tools\\\n'
+            'tools\\LICENSE-byeDPI.txt: %(VersionDir)s\\tools\\\n'))
+    update('chrome/installer/mini_installer/BUILD.gn', lambda text:
+        replace_once(text, '    "$root_out_dir/chrome.dll",\n',
+            '    "$root_out_dir/chrome.dll",\n'
+            '    "$root_out_dir/tools/ciadpi.exe",\n'
+            '    "$root_out_dir/tools/LICENSE-byeDPI.txt",\n'))
     update('chrome/install_static/chromium_install_modes.h', brand_install_modes)
     grd_before = (checkout / 'chrome/app/chromium_strings.grd').read_text(encoding='utf-8')
     grd_after = brand_messages(grd_before)

@@ -66,6 +66,7 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
     env.update({
         'DEPOT_TOOLS_WIN_TOOLCHAIN': '0', 'DEPOT_TOOLS_UPDATE': '0',
         'DEPOT_TOOLS_METRICS': '0',
+        'DEPOT_TOOLS_BUILD_TELEMETRY': '0',
         'GIT_CONFIG_COUNT': '2', 'GIT_CONFIG_KEY_0': 'core.longpaths',
         'GIT_CONFIG_VALUE_0': 'true', 'GIT_CONFIG_KEY_1': 'core.autocrlf',
         'GIT_CONFIG_VALUE_1': 'false',
@@ -109,6 +110,8 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
         output = source / 'out/InternetBrowser'
         output.mkdir(exist_ok=True, parents=True)
         shutil.copyfile(ROOT / 'native/chromium/windows/args.gn', output / 'args.gn')
+        from bundle_windows_transport import bundle
+        transport = bundle(output)
         # gclient bootstraps vpython. Invoke the pinned Python entry points
         # through it so GN and its scripts share a complete Python runtime.
         # The legacy .bat shims require a second, independently bootstrapped
@@ -129,6 +132,7 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
             'files': {name: sha256(output / name) for name in names},
             'overlay': json.loads((source / '.internet-browser-overlay.json').read_text(encoding='utf-8')),
             'native_source_compiled': True, 'runtime_verified': False,
+            'byedpi': transport,
             'release_approved': False,
         }
         report_file = output / 'native-provenance.json'
