@@ -7,6 +7,9 @@
 .pub/
 build/
 coverage/
+__pycache__/
+*.pyc
+/work/
 *.iml
 .idea/
 .vscode/

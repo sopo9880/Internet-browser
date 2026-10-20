@@ -3,6 +3,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      native_windows:
+        description: Build the v0.2.2 native Chromium Windows development candidate
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -32,6 +37,7 @@ jobs:
       - run: flutter analyze
       - run: flutter test
   android:
+    if: github.event_name != 'workflow_dispatch' || !inputs.native_windows
     runs-on: ubuntu-24.04
     needs: quality
     env:
@@ -60,6 +66,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
+    if: github.event_name != 'workflow_dispatch' || !inputs.native_windows
     # Flutter 3.35.x cannot identify Visual Studio 2026 on windows-latest.
     runs-on: windows-2022
     needs: quality
@@ -124,3 +131,34 @@ jobs:
           echo "Source pinned and prototype builder syntax checked."
           echo "Real Chromium engine compilation requires a separate 32GB/120GB runner."
           echo "AdBlock installation and in-app engine remain UNVERIFIED."
+
+  native_windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_windows
+    needs: quality
+    runs-on: [self-hosted, Windows, X64, chromium-windows-v022]
+    timeout-minutes: 1440
+    env:
+      NATIVE_WORKSPACE: ${{ vars.CHROMIUM_WINDOWS_WORKSPACE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate native source safeguards
+        shell: powershell
+        run: python -m unittest discover -s tool/tests -p test_windows_chromium.py -v
+      - name: Build Internet Browser from pinned Chromium source
+        shell: powershell
+        run: |
+          python -m pip install Pillow==11.3.0
+          if (-not $env:NATIVE_WORKSPACE) {
+            $env:NATIVE_WORKSPACE = "$env:RUNNER_TEMP\internet-browser-native-win"
+          }
+          ./tool/chromium/build_windows.ps1 -Workspace $env:NATIVE_WORKSPACE -Jobs 3
+          New-Item -ItemType Directory build/native-windows -Force | Out-Null
+          foreach ($file in @('chrome.7z', 'mini_installer.exe', 'native-provenance.json')) {
+            Copy-Item "$env:NATIVE_WORKSPACE\src\out\InternetBrowser\$file" build/native-windows/
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-v022-development-not-release
+          path: build/native-windows/*
+          if-no-files-found: error
+          retention-days: 14
