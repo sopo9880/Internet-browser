@@ -76,14 +76,17 @@ def eventually(action, predicate=bool, timeout: float = 30):
 
 
 @contextmanager
-def controlled_server():
+def controlled_server(media: bytes | None = None):
     requests = Counter()
     lock = Lock()
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             with lock:
                 requests[self.path] += 1
-            if self.path == '/control.js':
+            if self.path == '/download.webm' and media is not None:
+                body = media
+                mime = 'video/webm'
+            elif self.path == '/control.js':
                 body = b'window.controlLoaded = true;'
                 mime = 'text/javascript'
             elif self.path == '/tracker.js':
@@ -96,6 +99,8 @@ def controlled_server():
                 mime = 'text/html'
             self.send_response(200)
             self.send_header('Content-Type', mime)
+            if self.path == '/download.webm':
+                self.send_header('Content-Disposition', 'attachment; filename=downloaded.webm')
             self.send_header('Cache-Control', 'no-store')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
@@ -207,7 +212,10 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                         'targetId': worker['targetId'], 'flatten': True})['sessionId']
                     checks['fixture_mv3_worker_executed'] = cdp.evaluate(
                         worker_session, 'chrome.runtime.id') == extension_id
-                    with controlled_server() as (url, received):
+                    downloaded = Path(temporary) / 'BrowserDownloads'
+                    downloaded.mkdir()
+                    cdp.call('Browser.setDownloadBehavior', {'behavior': 'allow', 'downloadPath': str(downloaded)})
+                    with controlled_server(fixture.read_bytes()) as (url, received):
                         cdp.call('Page.navigate', {'url': url}, session=page_session)
                         eventually(lambda: cdp.evaluate(page_session, 'window.controlLoaded === true'))
                         checks['controlled_navigation'] = received['/control.js'] > 0
@@ -215,13 +223,17 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                         checks['fixture_dnr_request_blocked'] = (
                             received['/tracker.js'] == 0 and cdp.evaluate(
                                 page_session, 'window.trackerLoaded === undefined'))
+                        cdp.call('Page.navigate', {'url': url + '/download.webm'}, session=page_session)
+                        checks['native_browser_video_download'] = eventually(lambda:
+                            (downloaded / 'downloaded.webm').is_file() and
+                            (downloaded / 'downloaded.webm').read_bytes() == fixture.read_bytes())
                     cdp.call('Page.navigate', {
                         'url': f'chrome-extension://{extension_id}/popup.html'}, session=page_session)
                     checks['fixture_popup_document'] = eventually(lambda: cdp.evaluate(
                         page_session, "document.querySelector('#smoke-popup')?.textContent")) == 'Native extension popup document'
                     cdp.call('Page.navigate', {'url': 'chrome://internet-browser/'}, session=page_session)
-                    eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Renamed fixture'"))
-                    cdp.evaluate(page_session, "document.querySelector('#videos button').click()")
+                    eventually(lambda: cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\')?.textContent === "Renamed fixture"'))
+                    cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\').click()')
                     eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player')"))
                     cdp.evaluate(page_session, "document.querySelector('video').pause()")
                     checks['native_player_resume_from_legacy'] = eventually(lambda: cdp.evaluate(page_session,
@@ -231,12 +243,16 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                     checks['native_player_position_saved'] = bool(position)
                     checks['native_playback_preserves_edited_title'] = saved_video().get('title') == 'Renamed fixture'
                     cdp.call('Page.navigate', {'url': 'chrome://internet-browser/'}, session=page_session)
-                    eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Renamed fixture'"))
-                    cdp.evaluate(page_session, "document.querySelector('#videos button').click()")
+                    eventually(lambda: cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\')?.textContent === "Renamed fixture"'))
+                    cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\').click()')
                     eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player')"))
                     cdp.evaluate(page_session, "document.querySelector('video').pause()")
                     checks['native_player_reopen_resume'] = eventually(lambda: cdp.evaluate(page_session,
                         f"document.querySelector('video').readyState >= 1 && Math.abs(document.querySelector('video').currentTime - {position / 1000}) < 0.5"))
+                    cdp.call('Page.navigate', {'url': 'chrome://internet-browser/'}, session=page_session)
+                    checks['native_completed_download_in_library'] = eventually(lambda: cdp.evaluate(page_session, 'document.querySelector(\'#refresh-videos\')?.click(); !!document.querySelector(\'#videos .play-video[data-video-url$="/downloaded.webm"]\')'))
+                    cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/downloaded.webm"]\').click()')
+                    checks['native_downloaded_video_player'] = eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player') && document.querySelector('video').readyState >= 1"))
                     checks['original_library_unchanged'] = (library / 'library.json').read_bytes() == old_library
                     checks['original_preferences_unchanged'] = (legacy / 'shared_preferences.json').read_bytes() == old_preferences
                     if not all(checks.values()):

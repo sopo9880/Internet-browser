@@ -170,7 +170,7 @@ No installer was downloaded/executed by the renderer-flow tests.
 It validates the source/driver/nested repository pins, reviewed patch bytes,
 owned overlay hashes and unknown tracked edits before replacing only the recorded
 product overlay. It rebuilds the pinned transport, regenerates GN, compiles the
-five product translation units first, then builds `chrome_public_apk`. Final APK
+six product translation units first, then builds `chrome_public_apk`. Final APK
 checks cover package/version, the exact transport/license payload, ARM64 engine
 ELF and disposable signature. Provenance and source-phase records accompany the
 staged APK; they explicitly retain false runtime/release/production-signing flags.
@@ -217,6 +217,25 @@ messages. Planned executable checks cover actual bookmark import/deduplication,
 title writes, legacy resume, saved-position reopen, and unchanged original
 preference/library bytes. This extended native smoke has not yet run against the
 newly built product. The real AdBlock acceptance flags remain separately false.
+
+The library now merges only this profile's completed video downloads with the
+legacy folder. It waits for DownloadManager initialization, excludes blocked or
+removed items, validates local file/content-URI access on a worker, deduplicates
+URLs and retains default titles/source pages under stable download GUIDs. Android
+content URIs use Chromium's existing ContentURLLoader; renderer requests still
+select only entries returned by the browser's own library lookup. Refresh and
+window-focus updates expose newly completed downloads without copying/moving them.
+All ten legacy filename extensions remain listed; this is not proof that every
+container/codec plays in Chromium.
+
+Incognito library views can read existing metadata but do not persist new catalog
+entries, edited titles or playback positions to the normal profile. Six current
+Windows product translation units pass pinned-compiler syntax checks. Twelve
+renderer-flow checks pass with the native service stubbed, including refresh and
+content-URI forwarding. The native smoke now includes a real loopback video
+download and lookup/playback checks; those new executable checks have not run.
+Android scoped-storage access, history/restart behavior, codecs and privacy state
+writes still require native runtime/device acceptance.
 
 ## Required before release
 

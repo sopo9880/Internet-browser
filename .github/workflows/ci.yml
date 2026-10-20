@@ -57,6 +57,10 @@ jobs:
         run: |
           c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/update_validation_check.cc -o "$RUNNER_TEMP/update-validation-check"
           "$RUNNER_TEMP/update-validation-check"
+      - name: Verify legacy saved-video filename compatibility
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/video_file_types_check.cc -o "$RUNNER_TEMP/video-file-types-check"
+          "$RUNNER_TEMP/video-file-types-check"
       - name: Validate Android manifest XML
         run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get

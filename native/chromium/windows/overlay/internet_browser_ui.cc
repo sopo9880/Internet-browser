@@ -3,14 +3,17 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/functional/bind.h"
+#include "base/scoped_observation.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/task/thread_pool.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/internet_browser/legacy_data.h"
 #include "chrome/browser/internet_browser/video_player.h"
+#include "chrome/browser/internet_browser/video_downloads.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
 #include "chrome/browser/internet_browser/transport.h"
 #include "chrome/browser/internet_browser/updater.h"
@@ -20,6 +23,7 @@
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/browser/navigation_controller.h"
@@ -29,7 +33,8 @@
 #include "url/gurl.h"
 
 namespace {
-class InternetBrowserHandler : public content::WebUIMessageHandler {
+class InternetBrowserHandler : public content::WebUIMessageHandler,
+                               public content::DownloadManager::Observer {
  public:
   void RegisterMessages() override {
     web_ui()->RegisterMessageCallback("internetBrowserUpdate",
@@ -58,6 +63,24 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
   void OnJavascriptDisallowed() override {
     weak_factory_.InvalidateWeakPtrs();
     updater_.reset();
+    download_observation_.Reset();
+    pending_libraries_.clear();
+  }
+  void OnManagerInitialized() override {
+    download_observation_.Reset();
+    auto pending = std::move(pending_libraries_);
+    pending_libraries_.clear();
+    for (const auto& id : pending) VideosReady(id);
+  }
+  void ManagerGoingDown(content::DownloadManager* manager) override {
+    download_observation_.Reset();
+    auto pending = std::move(pending_libraries_);
+    pending_libraries_.clear();
+    for (const auto& id : pending) {
+      base::DictValue result; result.Set("videos", base::ListValue());
+      result.Set("error", "다운로드 기록을 불러오지 못했습니다.");
+      Reply(id, std::move(result));
+    }
   }
  private:
   void Reply(const std::string& id, base::DictValue data) {
@@ -119,18 +142,36 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     if (args.size() != 1 || !args[0].is_string())
       return;
     AllowJavascript();
+    auto* manager = Profile::FromWebUI(web_ui())->GetDownloadManager();
+    if (!manager->IsManagerInitialized()) {
+      pending_libraries_.push_back(args[0].GetString());
+      if (!download_observation_.IsObserving()) download_observation_.Observe(manager);
+      return;
+    }
+    VideosReady(args[0].GetString());
+  }
+  void VideosReady(const std::string& id) {
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
-        base::BindOnce(&internet_browser::ReadVideoLibrary, VideoStateFile()),
+        base::BindOnce(&internet_browser::ReadVideoLibraryWithDownloads, VideoStateFile(),
+                       internet_browser::CollectVideoDownloads(Profile::FromWebUI(web_ui())),
+                       Profile::FromWebUI(web_ui())->IsOffTheRecord()),
         base::BindOnce(&InternetBrowserHandler::Reply,
-                        weak_factory_.GetWeakPtr(), args[0].GetString()));
+                        weak_factory_.GetWeakPtr(), id));
   }
   void RenameVideo(const base::ListValue& args) {
     if (args.size() != 3 || !args[0].is_string() || !args[1].is_string() || !args[2].is_string()) return;
     AllowJavascript();
+    if (Profile::FromWebUI(web_ui())->IsOffTheRecord()) {
+      base::DictValue result; result.Set("saved", false);
+      result.Set("error", "시크릿 창에서는 영상 제목을 저장하지 않습니다.");
+      Reply(args[0].GetString(), std::move(result));
+      return;
+    }
     base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
-        base::BindOnce([](base::FilePath state, std::string requested, std::string title) {
-          auto library = internet_browser::ReadVideoLibrary(state);
+        base::BindOnce([](base::FilePath state, std::string requested, std::string title,
+                           std::vector<internet_browser::CompletedVideoDownload> downloads) {
+          auto library = internet_browser::ReadVideoLibraryWithDownloads(state, std::move(downloads));
           base::DictValue result;
           if (const auto* videos = library.FindList("videos")) {
             for (const auto& video : *videos) {
@@ -146,7 +187,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
           }
           result.Set("saved", false);
           return result;
-        }, VideoStateFile(), args[1].GetString(), args[2].GetString()),
+        }, VideoStateFile(), args[1].GetString(), args[2].GetString(),
+           internet_browser::CollectVideoDownloads(Profile::FromWebUI(web_ui()))),
         base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString()));
   }
   void ImportBookmarks(const base::ListValue& args) {
@@ -206,7 +248,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     Reply(id, std::move(result));
   }
   base::FilePath VideoStateFile() {
-    return Profile::FromWebUI(web_ui())->GetPath().AppendASCII("internet-browser-video-state.json");
+    auto* profile = Profile::FromWebUI(web_ui());
+    return profile->GetOriginalProfile()->GetPath().AppendASCII("internet-browser-video-state.json");
   }
   void OpenVideo(const base::ListValue& args) {
     if (args.size() != 2 || !args[0].is_string() || !args[1].is_string())
@@ -214,9 +257,10 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     AllowJavascript();
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
-        base::BindOnce([](const std::string& requested, const base::FilePath& state_file) {
+        base::BindOnce([](const std::string& requested, const base::FilePath& state_file,
+                           std::vector<internet_browser::CompletedVideoDownload> downloads, bool private_session) {
           base::DictValue result;
-          auto library = internet_browser::ReadVideoLibrary(state_file);
+          auto library = internet_browser::ReadVideoLibraryWithDownloads(state_file, std::move(downloads), private_session);
           if (const auto* videos = library.FindList("videos")) {
             for (const auto& video : *videos) {
               const auto* url = video.GetDict().FindString("url");
@@ -227,7 +271,9 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
             }
           }
           return result;
-        }, args[1].GetString(), VideoStateFile()),
+        }, args[1].GetString(), VideoStateFile(),
+           internet_browser::CollectVideoDownloads(Profile::FromWebUI(web_ui())),
+           Profile::FromWebUI(web_ui())->IsOffTheRecord()),
         base::BindOnce(&InternetBrowserHandler::CompleteOpenVideo,
                         weak_factory_.GetWeakPtr(), args[0].GetString()));
   }
@@ -237,7 +283,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     const auto* selected = video.FindString("selected");
     const std::string url = selected ? *selected : std::string();
     const bool installed = selected && internet_browser::InstallVideoPlayer(
-        web_ui()->GetWebContents(), std::move(video), url, VideoStateFile());
+        web_ui()->GetWebContents(), std::move(video), url,
+        Profile::FromWebUI(web_ui())->IsOffTheRecord() ? base::FilePath() : VideoStateFile());
     base::DictValue result;
     result.Set("opened", installed);
     Reply(id, std::move(result));
@@ -248,6 +295,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
           GURL(url), content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
     }
   }
+  base::ScopedObservation<content::DownloadManager, content::DownloadManager::Observer> download_observation_{this};
+  std::vector<std::string> pending_libraries_;
   std::unique_ptr<internet_browser::NativeUpdater> updater_;
   base::WeakPtrFactory<InternetBrowserHandler> weak_factory_{this};
 };

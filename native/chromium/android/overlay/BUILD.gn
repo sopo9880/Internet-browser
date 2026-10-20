@@ -22,6 +22,7 @@ source_set("ui") {
   deps = [
     ":transport",
     ":video_player",
+    ":video_library",
     ":updater",
     ":legacy_data",
     "//base",
@@ -34,7 +35,7 @@ source_set("ui") {
 }
 
 source_set("legacy_data") {
-  sources = [ "legacy_data.cc", "legacy_data.h", "video_metadata.h", "legacy_test_paths.h" ]
+  sources = [ "legacy_data.cc", "legacy_data.h", "video_metadata.h", "legacy_test_paths.h", "video_file_types.h" ]
   public_deps = [ "//base" ]
   deps = [ "//net", "//url" ]
 }
@@ -58,4 +59,10 @@ source_set("updater") {
     "//url",
   ]
   deps += [ "//chrome/browser/util:jni_headers" ]
+}
+
+source_set("video_library") {
+  sources = [ "video_downloads.cc", "video_downloads.h", "video_file_types.h", "video_metadata.h" ]
+  public_deps = [ "//base" ]
+  deps = [ ":legacy_data", "//components/download/public/common:public", "//content/public/browser", "//net", "//url" ]
 }

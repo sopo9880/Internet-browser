@@ -1,5 +1,6 @@
 #include "chrome/browser/internet_browser/legacy_data.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
+#include "chrome/browser/internet_browser/video_file_types.h"
 #include "chrome/browser/internet_browser/legacy_test_paths.h"
 
 #include <set>
@@ -92,11 +93,7 @@ base::DictValue ReadVideoLibrary(const base::FilePath& state_file) {
   const auto* entries = metadata.FindDict("items");
   base::FileEnumerator files(directory, false, base::FileEnumerator::FILES);
   for (auto path = files.Next(); !path.empty(); path = files.Next()) {
-    if (base::IsLink(path) ||
-        !(path.MatchesExtension(FILE_PATH_LITERAL(".mp4")) ||
-          path.MatchesExtension(FILE_PATH_LITERAL(".webm")) ||
-          path.MatchesExtension(FILE_PATH_LITERAL(".mkv")) ||
-          path.MatchesExtension(FILE_PATH_LITERAL(".mov"))))
+    if (base::IsLink(path) || !IsVideoFileName(path.BaseName().AsUTF8Unsafe()))
       continue;
     base::DictValue item;
     std::string name = path.BaseName().AsUTF8Unsafe();

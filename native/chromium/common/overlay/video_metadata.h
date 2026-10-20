@@ -56,6 +56,8 @@ inline void AddVideoMetadata(base::DictValue& item, const std::string& name,
   if (const auto* saved = native.FindDict(name)) {
     if (saved->Find("lastPositionMs"))
       item.Set("lastPositionMs", VideoPosition(*saved));
+    if (const auto* page = saved->FindString("sourcePage"); page && page->size() <= 4096)
+      item.Set("sourcePage", *page);
     if (const auto* title = saved->FindString("title")) {
       auto normalized = NormalizeVideoTitle(*title);
       if (!normalized.empty()) item.Set("title", normalized);
@@ -92,6 +94,36 @@ inline bool SaveVideoTitle(const base::FilePath& file, const std::string& name,
   std::string serialized;
   return base::JSONWriter::Write(state, &serialized) && serialized.size() <= 4 * 1024 * 1024 &&
       base::ImportantFileWriter::WriteFileAtomically(file, serialized);
+}
+inline base::DictValue MergeVideoCatalog(const base::FilePath& file,
+                                         const base::DictValue& defaults) {
+  if (file.empty()) return {};
+  base::AutoLock lock(VideoStateLock());
+  auto state = ReadVideoState(file);
+  bool changed = false;
+  for (const auto [key, value] : defaults) {
+    if (key.empty() || key.size() > 1024 || !value.is_dict()) continue;
+    const auto* previous = state.FindDict(key);
+    auto item = previous ? previous->Clone() : base::DictValue();
+    if (!item.FindString("title")) {
+      if (const auto* title = value.GetDict().FindString("title")) {
+        auto normalized = NormalizeVideoTitle(*title);
+        if (!normalized.empty()) {item.Set("title", normalized); changed = true;}
+      }
+    }
+    if (!item.FindString("sourcePage")) {
+      if (const auto* page = value.GetDict().FindString("sourcePage"); page && !page->empty() && page->size() <= 4096) {
+        item.Set("sourcePage", *page); changed = true;
+      }
+    }
+    state.Set(key, std::move(item));
+  }
+  if (changed) {
+    std::string serialized;
+    if (base::JSONWriter::Write(state, &serialized) && serialized.size() <= 4 * 1024 * 1024)
+      base::ImportantFileWriter::WriteFileAtomically(file, serialized);
+  }
+  return state;
 }
 }  // namespace internet_browser
 #endif

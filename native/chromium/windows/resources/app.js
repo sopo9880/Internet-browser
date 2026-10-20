@@ -86,15 +86,25 @@ document.querySelector('#import-bookmarks').addEventListener('click', async even
     button.disabled = false;
   }
 });
+let libraryLoading = false;
+async function refreshLibrary() {
+if (libraryLoading) return;
+libraryLoading = true;
+document.querySelector('#refresh-videos').disabled = true;
 try {
   const library = await sendWithPromise('internetBrowserVideos');
+  if (library.error) throw new Error(library.error);
+  document.querySelector('#videos').replaceChildren();
   document.querySelector('#video-status').textContent = library.videos.length
     ? `${library.videos.length}개의 저장된 영상` : '저장된 영상이 없습니다.';
+  if (library.privateSession) document.querySelector('#video-status').textContent += ' · 시크릿 창의 재생 기록은 저장하지 않습니다.';
   for (const video of library.videos) {
     const item = document.createElement('li');
     const link = document.createElement('button');
     const url = new URL(video.url);
-    if (url.protocol !== 'file:') continue;
+    if (!['file:', 'content:'].includes(url.protocol)) continue;
+    link.className = 'play-video';
+    link.dataset.videoUrl = url.href;
     link.textContent = video.title;
     link.addEventListener('click', async () => {
       try {
@@ -107,6 +117,7 @@ try {
     const rename = document.createElement('button');
     rename.type = 'button'; rename.className = 'secondary rename-video';
     rename.textContent = '이름 변경';
+    rename.disabled = library.privateSession === true;
     rename.addEventListener('click', async () => {
       const title = prompt('영상 제목', link.textContent);
       if (title === null) return;
@@ -116,7 +127,7 @@ try {
         if (result.saved) {
           link.textContent = result.title;
           document.querySelector('#video-status').textContent = '제목을 저장했습니다.';
-        } else document.querySelector('#video-status').textContent = '제목을 저장하지 못했습니다. 제목과 파일 상태를 확인해 주세요.';
+        } else document.querySelector('#video-status').textContent = result.error || '제목을 저장하지 못했습니다. 제목과 파일 상태를 확인해 주세요.';
       } catch {document.querySelector('#video-status').textContent = '제목을 저장하지 못했습니다.';}
       finally {rename.disabled = false;}
     });
@@ -125,7 +136,11 @@ try {
   }
 } catch {
   document.querySelector('#video-status').textContent = '영상 목록을 불러오지 못했습니다. 파일은 원래 위치에 보관되어 있습니다.';
+} finally {libraryLoading = false; document.querySelector('#refresh-videos').disabled = false;}
 }
+document.querySelector('#refresh-videos').addEventListener('click', refreshLibrary);
+window.addEventListener('focus', refreshLibrary);
+await refreshLibrary();
 
 const updateStatus = document.querySelector('#update-status');
 const updateAuto = document.querySelector('#update-auto');

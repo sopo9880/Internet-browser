@@ -38,13 +38,14 @@ def run(browser, work):
             cdp.call('Page.navigate', {'url':(directory/'index.html').as_uri()}, session=session)
             eventually(lambda: cdp.evaluate(session, '!!document.querySelector("#update-check")'))
             evaluate = lambda code: cdp.evaluate(session, code)
-            evaluate('''globalThis.calls=[];globalThis.confirm=()=>false;globalThis.failDownload=false;
+            evaluate('''globalThis.calls=[];globalThis.confirm=()=>false;globalThis.failDownload=false;globalThis.videoTitle='Saved example';
               globalThis.sendWithPromise=async (name,...args)=>{
                 calls.push([name,...args]);
                 if(name==='internetBrowserStatus')return {enabled:false,status:'테스트'};
                 if(name==='internetBrowserLegacy')return {found:false,settings:{update_auto_check:false}};
-                if(name==='internetBrowserVideos')return {videos:[{title:'Saved example',url:'file:///controlled/sample.webm'}]};
-                if(name==='internetBrowserRenameVideo')return {saved:true,title:args[1].trim()};
+                if(name==='internetBrowserVideos')return {videos:[{title:videoTitle,url:'file:///controlled/sample.webm'},{title:'Scoped example',url:'content://media/external/downloads/42'}]};
+                if(name==='internetBrowserRenameVideo'){videoTitle=args[1].trim();return {saved:true,title:videoTitle};}
+                if(name==='internetBrowserOpenVideo')return {opened:true};
                 if(name==='internetBrowserUpdate'){
                   if(args[0]==='check')return {available:true,canInstall:true,version:'0.3.0',tag:'v0.3.0',description:'<img src=x onerror=alert(1)>',releasePage:'https://github.com/sopo9880/Internet-browser/releases/tag/v0.3.0',android:false};
                   if(args[0]==='download')return failDownload?{error:'SHA-256 mismatch'}:{verified:true};
@@ -59,6 +60,11 @@ def run(browser, work):
             evaluate("globalThis.prompt=()=>'<img src=x> 새 제목';document.querySelector('.rename-video').click()")
             eventually(lambda:evaluate("document.querySelector('#videos button').textContent==='<img src=x> 새 제목'"))
             checks['renamed_title_is_literal'] = evaluate("!document.querySelector('#videos img')&&calls.some(x=>x[0]==='internetBrowserRenameVideo'&&x[1]==='file:///controlled/sample.webm')")
+            evaluate("document.querySelector('#refresh-videos').click()")
+            eventually(lambda:evaluate("!document.querySelector('#refresh-videos').disabled"))
+            checks['library_refresh_keeps_titles_without_duplicate_rows'] = evaluate("document.querySelectorAll('#videos li').length===2 && document.querySelector('#videos button').textContent==='<img src=x> 새 제목'")
+            evaluate("[...document.querySelectorAll('#videos button')].find(x=>x.textContent==='Scoped example').click()")
+            checks['scoped_uri_is_passed_to_native_lookup'] = evaluate("calls.some(x=>x[0]==='internetBrowserOpenVideo'&&x[1]==='content://media/external/downloads/42')")
             checks['legacy_auto_check_choice'] = evaluate("!document.querySelector('#update-auto').checked && !calls.some(x=>x[0]==='internetBrowserUpdate')")
             evaluate("document.querySelector('#update-check').click()")
             eventually(lambda:evaluate("!document.querySelector('#update-release').hidden"))
@@ -80,7 +86,7 @@ def run(browser, work):
             evaluate("document.querySelector('#update-snooze').click()")
             checks['snooze_is_tag_specific'] = evaluate("localStorage.getItem('update_snoozed_tag')==='v0.3.0'&&Number(localStorage.getItem('update_snoozed_until'))>Date.now()&&document.querySelector('#update-release').hidden")
             result={'kind':'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE','checks':checks,
-                    'native_download_hash_verified':False,'installer_executed':False,'release_approved':False}
+                    'native_download_hash_verified':False,'native_download_library_verified':False,'installer_executed':False,'release_approved':False}
             if not all(checks.values()):raise RuntimeError(str(result))
             (work/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
             return result

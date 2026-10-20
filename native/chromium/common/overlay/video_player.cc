@@ -22,6 +22,8 @@
 #include "content/public/common/referrer.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
+#include "build/build_config.h"
+#include "url/url_constants.h"
 
 namespace internet_browser {
 namespace {
@@ -91,7 +93,7 @@ class VideoPlayer : public base::SupportsUserData::Data,
       auto& item = videos_[index_].GetDict();
       item.Set("lastPositionMs", position);
       const auto* name = item.FindString("name");
-      if (name)
+      if (name && !state_file_.empty())
         writer_->PostTask(FROM_HERE, base::BindOnce([](base::FilePath file,
             std::string name, double position, double duration) {
           SaveVideoPosition(file, name, position, duration);
@@ -127,7 +129,11 @@ bool InstallVideoPlayer(content::WebContents* contents, base::DictValue library,
   for (size_t i = 0; i < videos->size(); ++i) {
     const auto* item = (*videos)[i].GetIfDict();
     if (!item || !item->FindString("name") || !item->FindString("url") ||
-        !GURL(*item->FindString("url")).SchemeIsFile())
+        !(GURL(*item->FindString("url")).SchemeIsFile()
+#if BUILDFLAG(IS_ANDROID)
+          || GURL(*item->FindString("url")).SchemeIs(url::kContentScheme)
+#endif
+        ))
       return false;
     if (*item->FindString("url") == selected)
       selected_index = i;
