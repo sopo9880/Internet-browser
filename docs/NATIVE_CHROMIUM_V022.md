@@ -180,12 +180,15 @@ Its prepare-only execution now passed on the real Linux cache, including source
 validation, transport rebuilding, product overlay and GN generation. No APK was
 created. `native-android.yml` schedules source-object checks on `chromium-wsl2`,
 sharing the Windows compile queue. Its APK phase requires main and matching
-product/release versions. Production signing/publication wiring remains required.
+product/release versions. Production signing is defined below; public release
+qualification and publication remain required.
 The old Flutter release path now permits only v0.2.1, so a v0.2.2 version change
 cannot accidentally publish the previous implementation.
 
-The formal Android pipeline is now defined in `native-android-production.yml`.
-It is manual and main-only, calls the native APK source builder once, then reuses
+The formal native pipeline is defined in `native-android-production.yml`.
+It is manual and main-only. It first requires matching native/release versions,
+then calls the Windows CI builder and packaged native fixture/media smoke before
+calling the native APK source builder once. It reuses
 that run's artifact on a GitHub-hosted signing job. Source jobs receive no
 production signing secrets. The signer checks the exact integration commit/tree,
 package/version, product-source hashes, transport payload and disposable signer
@@ -200,6 +203,25 @@ mocked signing tools, including wrong-certificate/tampered-payload rejection,
 key cleanup and refusal to overwrite an existing release APK. These do not prove
 a real APK is signed. The production workflow remains unexecuted: the migration
 is not merged and native/release version metadata does not yet match.
+
+`native-release-stage.yml` selects the exact Windows and signed Android artifact
+IDs from one successful formal run on the current main commit. The selector
+rejects PR/fork/other-commit runs, missing/duplicate/expired artifacts and missing
+archive digests. It rechecks the Windows source tree/product hashes, packaged
+archive/runtime identity and required native smoke results. It verifies the
+Android package/version, original production certificate and APK hash with the
+actual SDK tools, then copies the unchanged APK/EXE under their update asset
+names and emits provenance plus SHA256SUMS. Native overlay files use LF on both
+platforms so their source hashes agree across compilation and hosted staging.
+
+Seven synthetic staging tests cover incorrect origins, modified payloads,
+runtime/source mismatches, failed or empty smoke reports, wrong APK signatures,
+unchanged copies, checksums and overwrite refusal. This workflow has read-only
+permissions and uploads a review artifact; it does not build, sign, tag or
+publish. The manifest explicitly leaves real Windows extension/installer,
+remaining native features and corresponding-source distribution unaccepted.
+No formal or staging run has executed yet. The old Flutter publisher still
+cannot publish v0.2.2.
 
 The library now supports editing displayed titles through a browser-side lookup
 of an existing library URL. Native title and playback updates merge under the

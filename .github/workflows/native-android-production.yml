@@ -1,10 +1,10 @@
-name: Build and sign native Android for release (no publication)
+name: Build native release artifacts and sign Android (no publication)
 on:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: internet-browser-formal-native-android
+  group: internet-browser-formal-native-release
   cancel-in-progress: false
 jobs:
   trusted_main:
@@ -16,8 +16,25 @@ jobs:
           persist-credentials: false
       - name: Check signing policy without secrets
         run: python3 -m unittest discover -s tool/tests -p test_sign_native_android.py -v
-  native_source:
+      - name: Require qualified matching product and release versions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from tool.release_metadata import parse_pubspec
+          from tool.chromium.prepare_windows import PRODUCT
+          version = parse_pubspec(Path('pubspec.yaml').read_text())
+          if version.version != PRODUCT['app_version']:
+              raise SystemExit('Native product and release versions must match before formal compilation')
+          PY
+  native_windows:
     needs: trusted_main
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    with:
+      native_windows: true
+      native_android: false
+  native_source:
+    needs: native_windows
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/native-android.yml
     with:

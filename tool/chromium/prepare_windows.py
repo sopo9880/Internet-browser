@@ -19,6 +19,13 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCT = json.loads((ROOT / 'native/chromium/product.json').read_text())
 STAMP = '.internet-browser-overlay.json'
 
+
+def native_source_bytes(path: Path) -> bytes:
+    """Canonicalize our UTF-8 overlay sources even in an older CRLF checkout."""
+    data = path.read_bytes()
+    data.decode('utf-8')
+    return data.replace(b'\r\n', b'\n')
+
 try:
     from .windows_artwork import ARTWORK_PATHS, artwork
 except ImportError:
@@ -342,10 +349,10 @@ def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
     update('chrome/browser/ui/webui/BUILD.gn', integrate_config_build)
     for path in sorted((ROOT / 'native/chromium/common/overlay').glob('*')):
         if path.is_file():
-            changes['chrome/browser/internet_browser/' + path.name] = path.read_bytes()
+            changes['chrome/browser/internet_browser/' + path.name] = native_source_bytes(path)
     for path in sorted((ROOT / 'native/chromium/windows/overlay').glob('*')):
         if path.is_file():
-            changes['chrome/browser/internet_browser/' + path.name] = path.read_bytes()
+            changes['chrome/browser/internet_browser/' + path.name] = native_source_bytes(path)
     changes['chrome/browser/internet_browser/resources.h'] = resource_header()
 
     # Generate all native product images without touching provider artwork.

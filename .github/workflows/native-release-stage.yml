@@ -1,0 +1,77 @@
+name: Stage exact native release assets (no publication)
+on:
+  workflow_dispatch:
+    inputs:
+      formal_run_id:
+        description: Successful main-branch native release build run on this exact commit
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: internet-browser-native-release-staging
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FORMAL_RUN_ID: ${{ inputs.formal_run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate the exact successful formal build and artifact identities
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re
+          if not re.fullmatch(r'[1-9][0-9]{0,19}', os.environ['FORMAL_RUN_ID']):
+              raise SystemExit('A numeric formal build run ID is required')
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FORMAL_RUN_ID" > "$RUNNER_TEMP/native-formal-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FORMAL_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/native-formal-artifacts.json"
+          python3 -m tool.chromium.stage_native_release select \
+            --run "$RUNNER_TEMP/native-formal-run.json" --artifacts "$RUNNER_TEMP/native-formal-artifacts.json" \
+            --run-id "$FORMAL_RUN_ID"
+      - name: Reuse the exact Windows artifact ID
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.source.outputs.windows_id }}
+          merge-multiple: true
+          run-id: ${{ inputs.formal_run_id }}
+          github-token: ${{ github.token }}
+          path: build/formal-windows
+      - name: Reuse the exact production-signed Android artifact ID
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.source.outputs.android_id }}
+          merge-multiple: true
+          run-id: ${{ inputs.formal_run_id }}
+          github-token: ${{ github.token }}
+          path: build/formal-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify existing APK signature and stage unchanged APK/EXE with checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'build-tools;37.0.0'
+          TOOLS="$ANDROID_SDK_ROOT/build-tools/37.0.0"
+          python3 -m tool.chromium.stage_native_release stage \
+            --run "$RUNNER_TEMP/native-formal-run.json" --artifacts "$RUNNER_TEMP/native-formal-artifacts.json" \
+            --run-id "$FORMAL_RUN_ID" --windows build/formal-windows --android build/formal-android \
+            --aapt2 "$TOOLS/aapt2" --apksigner "$TOOLS/apksigner" --output dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-native-release-assets-not-published
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30

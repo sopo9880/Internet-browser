@@ -1,0 +1,4 @@
+self-hosted-runner:
+  labels:
+    - chromium-wsl2
+    - chromium-windows-v022

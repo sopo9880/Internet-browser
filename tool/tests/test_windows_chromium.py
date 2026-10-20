@@ -7,10 +7,20 @@ from tool.chromium.prepare_windows import (
     PRODUCT, brand_install_modes, brand_messages, brand_metadata, replace_once,
     overlay_path,
     remap_translation_ids,
+    native_source_bytes,
 )
 
 
 class NativeWindowsIdentityTests(unittest.TestCase):
+    def test_overlay_source_bytes_match_in_cached_crlf_and_fresh_lf_checkouts(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'source.cc'
+            path.write_bytes('// 한글\r\nint main() {}\r\n'.encode())
+            canonical = native_source_bytes(path)
+            self.assertEqual(canonical, '// 한글\nint main() {}\n'.encode())
+            path.write_bytes(canonical)
+            self.assertEqual(native_source_bytes(path), canonical)
+
     def test_product_names_change_without_claiming_chromium_copyright(self):
         original = ('PRODUCT_FULLNAME=Chromium\nPRODUCT_SHORTNAME=Chromium\n'
                     'PRODUCT_INSTALLER_FULLNAME=Chromium Installer\n'

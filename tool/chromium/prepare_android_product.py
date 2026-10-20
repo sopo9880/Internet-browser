@@ -16,9 +16,9 @@ import subprocess
 import xml.etree.ElementTree as ET
 
 try:
-    from .prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids, replace_once, resource_header
+    from .prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids, replace_once, resource_header, native_source_bytes
 except ImportError:
-    from prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids, replace_once, resource_header
+    from prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids, replace_once, resource_header, native_source_bytes
 
 
 def brand(text: str, *, xtb: bool = False) -> str:
@@ -120,13 +120,13 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
         raise ValueError('Refusing an existing Android product source overlay')
     changes = {directory / 'resources.h': resource_header(android=True)}
     for name in ('internet_browser_ui.cc', 'internet_browser_ui.h', 'transport.h', 'legacy_data.h'):
-        changes[directory / name] = (ROOT / 'native/chromium/windows/overlay' / name).read_bytes()
+        changes[directory / name] = native_source_bytes(ROOT / 'native/chromium/windows/overlay' / name)
     for path in (ROOT / 'native/chromium/common/overlay').iterdir():
         if path.is_file():
-            changes[directory / path.name] = path.read_bytes()
+            changes[directory / path.name] = native_source_bytes(path)
     for path in (ROOT / 'native/chromium/android/overlay').iterdir():
         if path.is_file():
-            changes[directory / path.name] = path.read_bytes()
+            changes[directory / path.name] = native_source_bytes(path)
     def update(relative, transform):
         path = checkout / relative
         changes[path] = transform(path.read_text(encoding='utf-8')).encode()

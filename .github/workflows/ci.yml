@@ -1,5 +1,13 @@
 name: Browser v0.x CI
 on:
+  workflow_call:
+    inputs:
+      native_windows:
+        type: boolean
+        default: false
+      native_android:
+        type: boolean
+        default: false
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -179,6 +187,8 @@ jobs:
       NATIVE_WORKSPACE: ${{ vars.CHROMIUM_WINDOWS_WORKSPACE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Validate native source safeguards
         shell: cmd
         run: python -m unittest discover -s tool/tests -p test_windows_chromium.py -v

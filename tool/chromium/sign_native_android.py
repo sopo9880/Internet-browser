@@ -18,7 +18,7 @@ import zipfile
 from tool.configure_android_signing import decode_key
 from tool.release_metadata import parse_pubspec, ReleaseMetadata
 from tool.chromium.build_native_android import verify_payload, sha256
-from tool.chromium.prepare_windows import PRODUCT, ROOT, resource_header
+from tool.chromium.prepare_windows import PRODUCT, ROOT, resource_header, native_source_bytes
 from tool.chromium.sign_candidate import PRODUCTION_CERT_SHA256, parse_verified_certificate_sha256
 from tool.chromium.titanium_product import PRODUCT_PACKAGE, verify_native_apk
 from tool.chromium.build_android_transport import REVISION, NDK_VERSION, LLVM_VERSION
@@ -29,10 +29,10 @@ def product_hashes(transport_sha256: str) -> dict[str, str]:
                 'libciadpi.so': transport_sha256,
                 'LICENSE-byeDPI.txt': sha256(ROOT / 'third_party/byedpi/LICENSE')}
     for name in ('internet_browser_ui.cc', 'internet_browser_ui.h', 'transport.h', 'legacy_data.h'):
-        expected[name] = sha256(ROOT / 'native/chromium/windows/overlay' / name)
+        expected[name] = hashlib.sha256(native_source_bytes(ROOT / 'native/chromium/windows/overlay' / name)).hexdigest()
     for directory in ('common', 'android'):
         for path in (ROOT / f'native/chromium/{directory}/overlay').iterdir():
-            if path.is_file(): expected[path.name] = sha256(path)
+            if path.is_file(): expected[path.name] = hashlib.sha256(native_source_bytes(path)).hexdigest()
     return expected
 
 
