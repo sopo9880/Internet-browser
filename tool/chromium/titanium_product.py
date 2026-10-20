@@ -124,6 +124,15 @@ def prepare_source(
             raise ValueError('Product overlay requires the explicit product package')
         script = Path(__file__).resolve().with_name('prepare_android_product.py')
         hooks = script.with_name('prepare_android_hooks.py')
+        patches = script.with_name('prepare_titanium_patches.py')
+        patch_start = '# https://grapheneos.org/build#browser-and-webview\n'
+        patch_end = 'git am --whitespace=nowarn --keep-non-patch $SCRIPT_DIR/vanadium/patches/*.patch\n'
+        if build.count(patch_start) != 1 or build.count(patch_end) != 1:
+            raise ValueError('Pinned Titanium patch-selection block changed')
+        before_patch, patch_body = build.split(patch_start, 1)
+        _, after_patch = patch_body.split(patch_end, 1)
+        build = (before_patch +
+            f'python3 {shlex.quote(str(patches))} --workspace "$SCRIPT_DIR/.."\n' + after_patch)
         build = replace_exact(build, 'gclient runhooks\n',
             f'python3 {shlex.quote(str(hooks))} --source "$SCRIPT_DIR"\n'
             'gclient runhooks\n')

@@ -131,6 +131,8 @@ def overlay_path(checkout: Path, relative: str) -> Path:
         'chrome/browser/ui/webui/BUILD.gn',
         'chrome/installer/mini_installer/chrome.release',
         'chrome/installer/mini_installer/BUILD.gn',
+        'chrome/browser/internet_browser/ciadpi.exe',
+        'chrome/browser/internet_browser/LICENSE-byeDPI.txt',
     }
     localized = re.fullmatch(r'chrome/app/resources/chromium_strings_[a-zA-Z0-9_-]+\.xtb', relative)
     owned = re.fullmatch(r'chrome/browser/internet_browser/[a-z_]+\.(?:cc|h|gn)', relative)
@@ -190,7 +192,7 @@ def remove_overlay(checkout: Path) -> None:
     stamp.unlink()
 
 
-def prepare(checkout: Path) -> dict:
+def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
     checkout = checkout.resolve(strict=True)
     revision = subprocess.check_output(
         ['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
@@ -212,6 +214,14 @@ def prepare(checkout: Path) -> dict:
     if status.strip():
         raise ValueError('Chromium checkout has tracked modifications; use a fresh checkout')
     changes: dict[str, bytes] = {}
+    if transport_directory is None:
+        raise ValueError('Verified transport payload directory is required')
+    binary = (transport_directory / 'ciadpi.exe').read_bytes()
+    if hashlib.sha256(binary).hexdigest() != 'eb53ceeeb981cc6735ac24bb1e51e725280b86630e80fdf19ddc4ee4a5b54ef4':
+        raise ValueError('Verified ByeDPI executable payload differs')
+    changes['chrome/browser/internet_browser/ciadpi.exe'] = binary
+    changes['chrome/browser/internet_browser/LICENSE-byeDPI.txt'] = (
+        ROOT / 'third_party/byedpi/LICENSE').read_bytes()
     def update(relative: str, transform) -> None:
         path = checkout / relative
         changes[relative] = transform(path.read_text(encoding='utf-8')).encode()
@@ -225,7 +235,11 @@ def prepare(checkout: Path) -> dict:
             'tools\\ciadpi.exe: %(VersionDir)s\\tools\\\n'
             'tools\\LICENSE-byeDPI.txt: %(VersionDir)s\\tools\\\n'))
     update('chrome/installer/mini_installer/BUILD.gn', lambda text:
-        replace_once(text, '    "$root_out_dir/chrome.dll",\n',
+        replace_once(replace_once(text,
+            '    ":chrome_runtime_deps",\n',
+            '    ":chrome_runtime_deps",\n'
+            '    "//chrome/browser/internet_browser:transport_payload",\n'),
+            '    "$root_out_dir/chrome.dll",\n',
             '    "$root_out_dir/chrome.dll",\n'
             '    "$root_out_dir/tools/ciadpi.exe",\n'
             '    "$root_out_dir/tools/LICENSE-byeDPI.txt",\n'))
@@ -341,11 +355,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkout', required=True, type=Path)
     parser.add_argument('--remove', action='store_true')
+    parser.add_argument('--transport-dir', type=Path)
     options = parser.parse_args()
     if options.remove:
         remove_overlay(options.checkout)
         print('Removed only the exact hash-verified product overlay.')
         raise SystemExit(0)
-    report = prepare(options.checkout)
+    report = prepare(options.checkout, options.transport_dir)
     print(f"Applied native Windows product overlay: {len(report['files'])} files. "
           'Compilation and extension runtime verification are still required.')

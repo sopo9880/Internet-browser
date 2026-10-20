@@ -1,3 +1,8 @@
+copy("transport_payload") {
+  sources = [ "ciadpi.exe", "LICENSE-byeDPI.txt" ]
+  outputs = [ "$root_out_dir/tools/{{source_file_part}}" ]
+}
+
 source_set("transport") {
   sources = [ "transport.cc", "transport.h" ]
   public_deps = [ "//base" ]

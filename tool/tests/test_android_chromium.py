@@ -5,9 +5,19 @@ from tool.chromium.prepare_android_product import brand
 from tool.chromium.titanium_product import prepare_source, PRODUCT_PACKAGE, RESEARCH_PACKAGE
 from tool.tests.test_titanium_product import ARGS, BUILD, METADATA
 from tool.chromium.prepare_android_hooks import configuration, HOOK_ACTION
+from tool.chromium.prepare_titanium_patches import branded_patch, selected
 
 
 class AndroidProductOverlayTests(unittest.TestCase):
+    def test_patch_branding_preserves_original_attribution(self):
+        data = b'+// Copyright The Vanadium Authors\n+class VanadiumConfig {}\n'
+        result = branded_patch(data)
+        self.assertIn(b'Copyright The Vanadium Authors', result)
+        self.assertIn(b'class TitaniumConfig', result)
+        self.assertFalse(selected('0010-trichrome-apk-build-targets.patch'))
+        self.assertFalse(selected('0020-add-config-app-parsing.patch'))
+        self.assertTrue(selected('0004-Vanadium-branding.patch'))
+
     def test_product_hooks_cannot_execute_configuration_code_or_fetch_latest_crx(self):
         config = {'solutions': [], 'target_os': ['android'], 'hooks': [
             {'name': 'fetch_titanium_extension', 'action': HOOK_ACTION},
@@ -30,7 +40,10 @@ class AndroidProductOverlayTests(unittest.TestCase):
             '<translationbundle><translation id="1">Titanium에서는</translation></translationbundle>', xtb=True))
 
     def test_overlay_is_fatal_and_runs_after_upstream_patches_before_gn(self):
-        before = BUILD + 'gclient runhooks\nsource $SCRIPT_DIR/patch.sh\ngn gen out/Default\n'
+        before = (BUILD + '# https://grapheneos.org/build#browser-and-webview\n'
+                  'rm unsafe-upstream-patch-directory\n'
+                  'git am --whitespace=nowarn --keep-non-patch $SCRIPT_DIR/vanadium/patches/*.patch\n'
+                  'gclient runhooks\nsource $SCRIPT_DIR/patch.sh\ngn gen out/Default\n')
         _, configured = prepare_source(ARGS, before, PRODUCT_PACKAGE,
                                        product_overlay=True, **METADATA)
         self.assertLess(configured.index('source $SCRIPT_DIR/patch.sh'),
@@ -38,6 +51,8 @@ class AndroidProductOverlayTests(unittest.TestCase):
         self.assertLess(configured.index('prepare_android_product.py'),
                         configured.index('gn gen out/Default'))
         self.assertIn('set -e\n', configured)
+        self.assertNotIn('rm unsafe-upstream-patch-directory', configured)
+        self.assertIn('prepare_titanium_patches.py', configured)
         with self.assertRaises(ValueError):
             prepare_source(ARGS, before, RESEARCH_PACKAGE, product_overlay=True)
 

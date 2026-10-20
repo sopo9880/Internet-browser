@@ -106,12 +106,14 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
             raise RuntimeError('VS 2026 Desktop C++ and ATL/MFC are required')
         env['vs2026_install'] = visual_studio
         run([depot / 'gclient.bat', 'runhooks'], cwd=workspace, env=env)
-        run([sys.executable, overlay, '--checkout', source], cwd=ROOT, env=env)
+        from bundle_windows_transport import bundle
+        payload = workspace / 'downloads/byedpi'
+        transport = bundle(payload)
+        run([sys.executable, overlay, '--checkout', source,
+             '--transport-dir', payload / 'tools'], cwd=ROOT, env=env)
         output = source / 'out/InternetBrowser'
         output.mkdir(exist_ok=True, parents=True)
         shutil.copyfile(ROOT / 'native/chromium/windows/args.gn', output / 'args.gn')
-        from bundle_windows_transport import bundle
-        transport = bundle(output)
         # gclient bootstraps vpython. Invoke the pinned Python entry points
         # through it so GN and its scripts share a complete Python runtime.
         # The legacy .bat shims require a second, independently bootstrapped
