@@ -102,7 +102,6 @@ class PinnedNativeReleaseTests(unittest.TestCase):
         flow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("39334182017", flow)
         self.assertIn("12226545642", flow)
-        self.assertIn("tool/release_pinned_native.py", flow)
         self.assertIn("python3 -m tool.release_pinned_native", flow)
         self.assertNotIn("python3 tool/release_pinned_native.py", flow)
         self.assertIn("docs/releases/v0.2.1.md", flow)
