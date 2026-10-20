@@ -51,6 +51,28 @@ without compiling. GN's actual toolchain checks remain authoritative.
   does not certify the real AdBlock, store installation or toolbar popup UI.
 - Provision Android dependencies separately as administrator, then build as
   the ordinary runner user. Do not enable global passwordless sudo.
+- Local Windows and Android compile jobs share one concurrency group so they
+  cannot exhaust the same PC's memory together. Source download alone may run
+  alongside compilation.
+
+## Android product preparation
+
+`prepare_android_source.py` obtains pinned Titanium, Vanadium, Chromium and
+depot_tools in a dedicated Linux cache. It executes no upstream hooks or sudo.
+`titanium_product.py configure --product-overlay --preprovisioned-deps` prepares
+the product package/version and inserts the product overlay before GN.
+
+The product hook configuration excludes the unrelated Titanium helper's
+unversioned `latest` CRX download. AdBlock remains an explicit store installation.
+The source overlay restores external-extension safety checking, applies the
+existing parcel icon and Internet Browser resource text, and remaps translation
+fingerprints using the pinned Chromium GRIT implementation. Actual Chromium
+resource checks produced identical full-file and wrapped-message mappings for
+484 changed Android message fingerprints.
+
+These are source checks. They do not establish successful Android compilation,
+ByeDPI/media/data integration, a physical device's security verdict, or release
+readiness. The complete Android product build orchestration is still pending.
 
 ## Required before release
 

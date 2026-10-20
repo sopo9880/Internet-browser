@@ -123,6 +123,10 @@ def prepare_source(
         if package != PRODUCT_PACKAGE:
             raise ValueError('Product overlay requires the explicit product package')
         script = Path(__file__).resolve().with_name('prepare_android_product.py')
+        hooks = script.with_name('prepare_android_hooks.py')
+        build = replace_exact(build, 'gclient runhooks\n',
+            f'python3 {shlex.quote(str(hooks))} --source "$SCRIPT_DIR"\n'
+            'gclient runhooks\n')
         build = replace_exact(build, 'source $SCRIPT_DIR/patch.sh\n',
             'source $SCRIPT_DIR/patch.sh\n'
             f'python3 {shlex.quote(str(script))} --checkout "$PWD"\n')
