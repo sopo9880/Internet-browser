@@ -19,6 +19,10 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/referrer.h"
+#include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
 namespace {
@@ -39,6 +43,9 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
                              base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserImportBookmarks",
         base::BindRepeating(&InternetBrowserHandler::ImportBookmarks,
+                             base::Unretained(this)));
+    web_ui()->RegisterMessageCallback("internetBrowserOpenVideo",
+        base::BindRepeating(&InternetBrowserHandler::OpenVideo,
                              base::Unretained(this)));
   }
   void OnJavascriptDisallowed() override {
@@ -149,6 +156,43 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     }
     result.Set("imported", imported);
     Reply(id, std::move(result));
+  }
+  void OpenVideo(const base::ListValue& args) {
+    if (args.size() != 2 || !args[0].is_string() || !args[1].is_string())
+      return;
+    AllowJavascript();
+    base::ThreadPool::PostTaskAndReplyWithResult(
+        FROM_HERE, {base::MayBlock()},
+        base::BindOnce([](const std::string& requested) {
+          base::DictValue result;
+          auto library = internet_browser::ReadVideoLibrary();
+          if (const auto* videos = library.FindList("videos")) {
+            for (const auto& video : *videos) {
+              const auto* url = video.GetDict().FindString("url");
+              if (url && *url == requested) {
+                result.Set("url", *url);
+                break;
+              }
+            }
+          }
+          return result;
+        }, args[1].GetString()),
+        base::BindOnce(&InternetBrowserHandler::CompleteOpenVideo,
+                        weak_factory_.GetWeakPtr(), args[0].GetString()));
+  }
+  void CompleteOpenVideo(const std::string& id, base::DictValue video) {
+    if (!IsJavascriptAllowed())
+      return;
+    const auto* url = video.FindString("url");
+    base::DictValue result;
+    result.Set("opened", url != nullptr);
+    Reply(id, std::move(result));
+    if (url) {
+      // Browser-initiated navigation permits a trusted local media document;
+      // arbitrary renderer-supplied file paths never pass the library lookup.
+      web_ui()->GetWebContents()->GetController().LoadURL(
+          GURL(*url), content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
+    }
   }
   base::WeakPtrFactory<InternetBrowserHandler> weak_factory_{this};
 };

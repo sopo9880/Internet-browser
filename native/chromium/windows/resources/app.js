@@ -64,11 +64,18 @@ try {
     ? `${library.videos.length}개의 저장된 영상` : '저장된 영상이 없습니다.';
   for (const video of library.videos) {
     const item = document.createElement('li');
-    const link = document.createElement('a');
+    const link = document.createElement('button');
     const url = new URL(video.url);
     if (url.protocol !== 'file:') continue;
-    link.href = url.href;
     link.textContent = video.title;
+    link.addEventListener('click', async () => {
+      try {
+        const result = await sendWithPromise('internetBrowserOpenVideo', url.href);
+        if (!result.opened) document.querySelector('#video-status').textContent = '파일을 찾을 수 없습니다.';
+      } catch {
+        document.querySelector('#video-status').textContent = '영상을 열지 못했습니다.';
+      }
+    });
     item.append(link);
     document.querySelector('#videos').append(item);
   }
