@@ -1,4 +1,5 @@
 #include "chrome/browser/internet_browser/legacy_data.h"
+#include "chrome/browser/internet_browser/video_metadata.h"
 
 #include <set>
 #include <string>
@@ -71,7 +72,7 @@ base::DictValue ReadLegacyData() {
   return result;
 }
 
-base::DictValue ReadVideoLibrary() {
+base::DictValue ReadVideoLibrary(const base::FilePath& state_file) {
   base::DictValue result;
   base::ListValue videos;
   base::FilePath documents;
@@ -81,6 +82,7 @@ base::DictValue ReadVideoLibrary() {
   }
   auto directory = documents.AppendASCII("Videos");
   auto metadata = ReadDictionary(directory.AppendASCII("library.json"));
+  auto native = ReadVideoState(state_file);
   const auto* entries = metadata.FindDict("items");
   base::FileEnumerator files(directory, false, base::FileEnumerator::FILES);
   for (auto path = files.Next(); !path.empty(); path = files.Next()) {
@@ -94,14 +96,7 @@ base::DictValue ReadVideoLibrary() {
     std::string name = path.BaseName().AsUTF8Unsafe();
     item.Set("title", name);
     item.Set("url", net::FilePathToFileURL(path).spec());
-    if (entries) {
-      if (const auto* entry = entries->FindDict(name)) {
-        if (const auto* title = entry->FindString("title"))
-          item.Set("title", *title);
-        // Metadata stays on disk unchanged; seeking/playback is handled by
-        // Chromium's native media document until the library player is ported.
-      }
-    }
+    AddVideoMetadata(item, name, entries ? entries->FindDict(name) : nullptr, native);
     videos.Append(std::move(item));
   }
   result.Set("videos", std::move(videos));

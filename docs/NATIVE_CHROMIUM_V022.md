@@ -128,6 +128,25 @@ checkout. These source changes require the next rebuild and runtime inspection;
 they have not modified the source cache used by the active full build. Search and
 provider artwork, distinct incognito/security icons and attribution remain intact.
 
+The shared local player is now wired to validated library-file navigation.
+A WebContents observer injects controls only into the selected primary-frame
+file in Chromium's existing internal isolated world. Position reports and
+next/previous commands are restricted to that library, with profile-local atomic
+state writes; original videos and `library.json` stay untouched. Legacy positions
+are read through until a native position exists. Controls include resume,
+playlist continuation, rate, volume, loop, fit, lock, keyboard seek, temporary
+2x playback, media-session actions, fullscreen and a capability-gated PiP button.
+
+The four Windows product translation units passed pinned compiler syntax checks.
+`check_video_player.py` exercised a real WebM media document in Chrome
+155.0.8059.85 using a temporary profile: playback, resume, percent seeking, lock,
+rate, loop/fit, position reporting, playlist choices, literal metadata text and
+control layout passed. Visual review found and fixed MediaDocument's inline
+absolute-video positioning. These checks cover the renderer script; native
+observer navigation/state persistence, final product codecs, PiP, Android
+background playback, external subtitles/tracks, download integration and full
+library parity still require implementation or product-runtime acceptance.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;

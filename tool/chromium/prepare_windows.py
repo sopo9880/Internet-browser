@@ -206,7 +206,7 @@ def resource_header(android: bool = False) -> bytes:
                  '#define CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
                  'namespace internet_browser {']
     for filename, constant in [('index.html', 'kIndexHtml'), ('app.js', 'kAppJs'),
-                               ('style.css', 'kStyleCss')]:
+                               ('style.css', 'kStyleCss'), ('video_player.js', 'kVideoPlayerJs')]:
         content = (ROOT / 'native/chromium/windows/resources' / filename).read_text(encoding='utf-8')
         if ')IBRESOURCE"' in content:
             raise ValueError('Unexpected raw-string delimiter in native resources')

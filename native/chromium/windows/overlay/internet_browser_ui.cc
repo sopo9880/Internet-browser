@@ -10,6 +10,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/internet_browser/legacy_data.h"
+#include "chrome/browser/internet_browser/video_player.h"
 #include "chrome/browser/internet_browser/transport.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -98,7 +99,7 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     AllowJavascript();
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
-        base::BindOnce(&internet_browser::ReadVideoLibrary),
+        base::BindOnce(&internet_browser::ReadVideoLibrary, VideoStateFile()),
         base::BindOnce(&InternetBrowserHandler::Reply,
                         weak_factory_.GetWeakPtr(), args[0].GetString()));
   }
@@ -158,41 +159,47 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     result.Set("imported", imported);
     Reply(id, std::move(result));
   }
+  base::FilePath VideoStateFile() {
+    return Profile::FromWebUI(web_ui())->GetPath().AppendASCII("internet-browser-video-state.json");
+  }
   void OpenVideo(const base::ListValue& args) {
     if (args.size() != 2 || !args[0].is_string() || !args[1].is_string())
       return;
     AllowJavascript();
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
-        base::BindOnce([](const std::string& requested) {
+        base::BindOnce([](const std::string& requested, const base::FilePath& state_file) {
           base::DictValue result;
-          auto library = internet_browser::ReadVideoLibrary();
+          auto library = internet_browser::ReadVideoLibrary(state_file);
           if (const auto* videos = library.FindList("videos")) {
             for (const auto& video : *videos) {
               const auto* url = video.GetDict().FindString("url");
               if (url && *url == requested) {
-                result.Set("url", *url);
-                break;
+                library.Set("selected", *url);
+                return library;
               }
             }
           }
           return result;
-        }, args[1].GetString()),
+        }, args[1].GetString(), VideoStateFile()),
         base::BindOnce(&InternetBrowserHandler::CompleteOpenVideo,
                         weak_factory_.GetWeakPtr(), args[0].GetString()));
   }
   void CompleteOpenVideo(const std::string& id, base::DictValue video) {
     if (!IsJavascriptAllowed())
       return;
-    const auto* url = video.FindString("url");
+    const auto* selected = video.FindString("selected");
+    const std::string url = selected ? *selected : std::string();
+    const bool installed = selected && internet_browser::InstallVideoPlayer(
+        web_ui()->GetWebContents(), std::move(video), url, VideoStateFile());
     base::DictValue result;
-    result.Set("opened", url != nullptr);
+    result.Set("opened", installed);
     Reply(id, std::move(result));
-    if (url) {
+    if (installed) {
       // Browser-initiated navigation permits a trusted local media document;
       // arbitrary renderer-supplied file paths never pass the library lookup.
       web_ui()->GetWebContents()->GetController().LoadURL(
-          GURL(*url), content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
+          GURL(url), content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
     }
   }
   base::WeakPtrFactory<InternetBrowserHandler> weak_factory_{this};

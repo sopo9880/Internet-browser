@@ -21,6 +21,7 @@ source_set("ui") {
   public_deps = [ "//content/public/browser" ]
   deps = [
     ":transport",
+    ":video_player",
     ":legacy_data",
     "//base",
     "//chrome/browser/profiles:profile",
@@ -32,7 +33,13 @@ source_set("ui") {
 }
 
 source_set("legacy_data") {
-  sources = [ "legacy_data.cc", "legacy_data.h" ]
+  sources = [ "legacy_data.cc", "legacy_data.h", "video_metadata.h" ]
   public_deps = [ "//base" ]
   deps = [ "//net", "//url" ]
+}
+
+source_set("video_player") {
+  sources = [ "video_player.cc", "video_player.h", "video_metadata.h", "resources.h" ]
+  public_deps = [ "//content/public/browser", "//base" ]
+  deps = [ "//chrome/common", "//content/public/common", "//ui/base:types", "//url" ]
 }

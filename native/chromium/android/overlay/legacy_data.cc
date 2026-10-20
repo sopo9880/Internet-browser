@@ -1,4 +1,5 @@
 #include "chrome/browser/internet_browser/legacy_data.h"
+#include "chrome/browser/internet_browser/video_metadata.h"
 
 #include <set>
 #include <string>
@@ -50,7 +51,7 @@ base::DictValue ReadLegacyData() {
   return result;
 }
 
-base::DictValue ReadVideoLibrary() {
+base::DictValue ReadVideoLibrary(const base::FilePath& state_file) {
   base::DictValue result;
   base::ListValue videos;
   base::FilePath data;
@@ -62,6 +63,7 @@ base::DictValue ReadVideoLibrary() {
   // Retain its original files and metadata; never move or overwrite videos.
   auto directory = data.DirName().AppendASCII("app_flutter").AppendASCII("Videos");
   auto metadata = ReadDictionary(directory.AppendASCII("library.json"));
+  auto native = ReadVideoState(state_file);
   const auto* entries = metadata.FindDict("items");
   base::FileEnumerator files(directory, false, base::FileEnumerator::FILES);
   for (auto path = files.Next(); !path.empty(); path = files.Next()) {
@@ -75,12 +77,7 @@ base::DictValue ReadVideoLibrary() {
     base::DictValue item;
     item.Set("title", name);
     item.Set("url", net::FilePathToFileURL(path).spec());
-    if (entries) {
-      if (const auto* entry = entries->FindDict(name)) {
-        if (const auto* title = entry->FindString("title"))
-          item.Set("title", *title);
-      }
-    }
+    AddVideoMetadata(item, name, entries ? entries->FindDict(name) : nullptr, native);
     videos.Append(std::move(item));
   }
   result.Set("videos", std::move(videos));
