@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -12,16 +13,25 @@ import subprocess
 REVISION = '7efde1b1296eaaa187b70e951894dde17527489c'
 REPOSITORY = 'https://github.com/hufrea/byedpi.git'
 NDK_VERSION = '30.0.16248370'  # Pinned Chromium 155 DEPS: 2@30.0.16248370.
+LLVM_VERSION = 'llvmorg-24-init-7747-g62397f8b-27'
 
 
 def build(checkout: Path, workspace: Path) -> Path:
     ndk = checkout / 'third_party/android_toolchain/ndk'
-    properties = (ndk / 'source.properties').read_text(encoding='utf-8')
-    if not any(line.strip() == 'Pkg.Revision = ' + NDK_VERSION for line in properties.splitlines()):
+    deps = (checkout / 'DEPS').read_text(encoding='utf-8')
+    if "'android_ndk_version': Str('2@" + NDK_VERSION + "')" not in deps:
         raise ValueError('Android NDK revision differs from the pinned Chromium toolchain')
-    compiler = ndk / 'toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang'
-    if not compiler.is_file():
+    # Chromium ships an NDK sysroot subset and its own pinned LLVM, rather
+    # than the Android SDK's standalone compiler-wrapper scripts.
+    llvm = checkout / 'third_party/llvm-build/Release+Asserts'
+    compiler = llvm / 'bin/clang'
+    sysroot = ndk / 'toolchains/llvm/prebuilt/linux-x86_64/sysroot'
+    if not compiler.is_file() or not sysroot.is_dir():
         raise ValueError('Pinned Android ARM64 compiler missing')
+    if (llvm / 'cr_build_revision').read_text(encoding='utf-8').strip() != LLVM_VERSION:
+        raise ValueError('Chromium LLVM revision differs')
+    if not all(re.fullmatch(r'[A-Za-z0-9_./+-]+', str(path)) for path in (compiler, sysroot, workspace)):
+        raise ValueError('Native make workspace paths must contain no spaces or shell metacharacters')
     workspace.mkdir(parents=True, exist_ok=True)
     source = workspace / 'byedpi'
     if not source.exists():
@@ -34,7 +44,8 @@ def build(checkout: Path, workspace: Path) -> Path:
     if actual != REVISION or status.strip():
         raise ValueError('ByeDPI source pin or tracked files differ')
     subprocess.run(['make', 'clean'], cwd=source, check=True)
-    subprocess.run(['make', '-j', '1', 'all', 'CC=' + str(compiler),
+    compiler_command = str(compiler) + ' --target=aarch64-linux-android24 --sysroot=' + str(sysroot)
+    subprocess.run(['make', '-j', '1', 'all', 'CC=' + compiler_command,
         'CFLAGS=-I. -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2',
         'LDFLAGS=-pie -Wl,-z,relro,-z,now,-z,max-page-size=16384'], cwd=source, check=True)
     binary = (source / 'ciadpi').read_bytes()
@@ -42,7 +53,7 @@ def build(checkout: Path, workspace: Path) -> Path:
         raise ValueError('ByeDPI output is not an ARM64 Android PIE')
     output = workspace / 'libciadpi.so'
     shutil.copyfile(source / 'ciadpi', output)
-    report = {'source_revision': REVISION, 'ndk_version': NDK_VERSION,
+    report = {'source_revision': REVISION, 'ndk_version': NDK_VERSION, 'llvm_revision': LLVM_VERSION,
               'sha256': hashlib.sha256(binary).hexdigest(), 'abi': 'arm64-v8a',
               'compiled': True, 'device_verified': False, 'release_approved': False}
     (workspace / 'transport-provenance.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
