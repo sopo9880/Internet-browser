@@ -142,6 +142,7 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
                 raise RuntimeError('Missing actual native build output: ' + name)
         report = {
             'product': PRODUCT,
+            'source_revision': revision,
             'integration_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
             'integration_tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], cwd=ROOT, text=True).strip(),
             'files': {name: sha256(output / name) for name in names},

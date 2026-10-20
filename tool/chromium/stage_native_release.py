@@ -84,11 +84,11 @@ def windows_product_hashes() -> dict[str, str]:
 def validate_windows(source: Path, commit: str, tree: str) -> dict:
     report = json.loads((source / 'native-provenance.json').read_text(encoding='utf-8'))
     require(report.get('native_source_compiled') is True and report.get('product') == PRODUCT and
+            report.get('source_revision') == PRODUCT['chromium_revision'] and
             report.get('integration_commit') == commit and report.get('integration_tree') == tree,
             'Windows build source identity differs')
     overlay = report.get('overlay', {})
-    require(overlay.get('source_revision') == PRODUCT['chromium_revision'] and
-            overlay.get('product') == PRODUCT, 'Windows Chromium source pin differs')
+    require(overlay.get('product') == PRODUCT, 'Windows Chromium overlay product differs')
     for name, expected in windows_product_hashes().items():
         require(overlay.get('files', {}).get('chrome/browser/internet_browser/' + name) == expected,
                 'Windows compiled product file differs: ' + name)

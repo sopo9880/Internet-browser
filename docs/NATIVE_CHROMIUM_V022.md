@@ -214,7 +214,7 @@ actual SDK tools, then copies the unchanged APK/EXE under their update asset
 names and emits provenance plus SHA256SUMS. Native overlay files use LF on both
 platforms so their source hashes agree across compilation and hosted staging.
 
-Seven synthetic staging tests cover incorrect origins, modified payloads,
+Eight synthetic staging tests cover incorrect origins, modified payloads,
 runtime/source mismatches, failed or empty smoke reports, wrong APK signatures,
 unchanged copies, checksums and overwrite refusal. This workflow has read-only
 permissions and uploads a review artifact; it does not build, sign, tag or
@@ -222,6 +222,12 @@ publish. The manifest explicitly leaves real Windows extension/installer,
 remaining native features and corresponding-source distribution unaccepted.
 No formal or staging run has executed yet. The old Flutter publisher still
 cannot publish v0.2.2.
+
+The Windows build provenance records the verified root source revision directly.
+Its overlay marker stores the source pin inside `product`, unlike Android's
+separate marker field; staging checks the actual producer format. A regression
+test covers this distinction so a valid Windows build is not rejected merely
+because its marker lacks an Android-specific field.
 
 The library now supports editing displayed titles through a browser-side lookup
 of an existing library URL. Native title and playback updates merge under the

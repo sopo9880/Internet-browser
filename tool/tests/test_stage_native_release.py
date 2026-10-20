@@ -39,8 +39,9 @@ class NativeReleaseStageTests(unittest.TestCase):
         files = {name: staging.sha256(directory / name) for name in ('mini_installer.exe', 'chrome.7z')}
         files['chrome.exe'] = 'e' * 64
         report = {'native_source_compiled': True, 'product': staging.PRODUCT,
+                  'source_revision': staging.PRODUCT['chromium_revision'],
                   'integration_commit': COMMIT, 'integration_tree': TREE, 'files': files,
-                  'overlay': {'product': staging.PRODUCT, 'source_revision': staging.PRODUCT['chromium_revision'],
+                  'overlay': {'product': staging.PRODUCT,
                               'files': {'chrome/browser/internet_browser/' + name: value
                                         for name, value in staging.windows_product_hashes().items()}}}
         self.write(directory / 'native-provenance.json', report)
@@ -101,12 +102,13 @@ class NativeReleaseStageTests(unittest.TestCase):
                 staging.select_artifacts(run, listing, COMMIT, RUN_ID)
 
     def test_windows_rejects_changed_bytes_source_overlay_runtime_or_failed_smoke(self):
-        for case in ('bytes', 'tree', 'overlay', 'runtime', 'smoke', 'empty-smoke', 'other-exe'):
+        for case in ('bytes', 'tree', 'source', 'overlay', 'runtime', 'smoke', 'empty-smoke', 'other-exe'):
             with self.subTest(case=case), TemporaryDirectory() as temporary:
                 directory = Path(temporary) / 'windows'
                 report, runtime, smoke = self.windows(directory)
                 if case == 'bytes': (directory / 'mini_installer.exe').write_bytes(b'changed')
                 if case == 'tree': report['integration_tree'] = 'f' * 40
+                if case == 'source': report['source_revision'] = 'f' * 40
                 if case == 'overlay': report['overlay']['files'].clear()
                 if case == 'runtime': runtime['source_archive_sha256'] = 'f' * 64
                 if case == 'smoke': smoke['checks']['native_browser_started'] = False
@@ -116,6 +118,14 @@ class NativeReleaseStageTests(unittest.TestCase):
                 self.write(directory / 'runtime-provenance.json', runtime)
                 self.write(directory / 'windows-smoke.json', smoke)
                 with self.assertRaises(ValueError): staging.validate_windows(directory, COMMIT, TREE)
+
+    def test_windows_accepts_actual_overlay_marker_shape(self):
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'windows'
+            report, _, _ = self.windows(directory)
+            # prepare_windows records its pin inside product, unlike the Android marker.
+            self.assertNotIn('source_revision', report['overlay'])
+            self.assertEqual(staging.validate_windows(directory, COMMIT, TREE), report)
 
     @patch.object(staging, 'verify_native_apk')
     def test_android_rechecks_actual_signature_after_payload_hash(self, verify):
