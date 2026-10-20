@@ -1,0 +1,92 @@
+[
+  {
+    "project": "Chromium",
+    "file": "chromium-LICENSE.txt",
+    "sha256": "368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b",
+    "revision": "5869fe313571d75152b77813cf0a4ee26a4e6df0",
+    "source_path": "LICENSE",
+    "repository": "https://chromium.googlesource.com/chromium/src.git",
+    "platforms": [
+      "windows",
+      "android"
+    ]
+  },
+  {
+    "project": "Titanium",
+    "file": "titanium-LICENSE.txt",
+    "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505",
+    "revision": "e59e03dc83bc940d73cf29a7683286fca390b393",
+    "source_path": "LICENSE",
+    "repository": "https://github.com/jqssun/android-titanium-browser",
+    "platforms": [
+      "android"
+    ]
+  },
+  {
+    "project": "Vanadium",
+    "file": "vanadium-LICENSE.txt",
+    "sha256": "24273c8b0441bd7a9635ddd92bf4578d4d2fcea03d490d16615a41fcde42992e",
+    "revision": "20526e052e304b62cf3e80114b423934e2d1c540",
+    "source_path": "LICENSE",
+    "repository": "https://github.com/GrapheneOS/Vanadium",
+    "platforms": [
+      "android"
+    ]
+  },
+  {
+    "project": "Vanadium",
+    "file": "vanadium-LICENSE.GPL-2.0.txt",
+    "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+    "revision": "20526e052e304b62cf3e80114b423934e2d1c540",
+    "source_path": "LICENSE.GPL-2.0",
+    "repository": "https://github.com/GrapheneOS/Vanadium",
+    "platforms": [
+      "android"
+    ]
+  },
+  {
+    "project": "Vanadium",
+    "file": "vanadium-LICENSE.Apache-2.0-note.txt",
+    "sha256": "1be0055a8e0e133a18ebd8891a77ae01c4d96e5ed16e57d279263f2082bf452b",
+    "revision": "20526e052e304b62cf3e80114b423934e2d1c540",
+    "source_path": "LICENSE.Apache-2.0-note",
+    "repository": "https://github.com/GrapheneOS/Vanadium",
+    "platforms": [
+      "android"
+    ]
+  },
+  {
+    "project": "Vanadium",
+    "file": "vanadium-LICENSE.FTL-note.txt",
+    "sha256": "8eb8103b82fe9db5a4440a5f69a1dbce20abb2921ea7d76c76b2b062f2aec944",
+    "revision": "20526e052e304b62cf3e80114b423934e2d1c540",
+    "source_path": "LICENSE.FTL-note",
+    "repository": "https://github.com/GrapheneOS/Vanadium",
+    "platforms": [
+      "android"
+    ]
+  },
+  {
+    "project": "Vanadium",
+    "file": "vanadium-LICENSE.WebView-note.txt",
+    "sha256": "d565eadf5fcf09a4ef8db34480461c74d0874cad93e7fb943ad697f8bdc11749",
+    "revision": "20526e052e304b62cf3e80114b423934e2d1c540",
+    "source_path": "LICENSE.WebView-note",
+    "repository": "https://github.com/GrapheneOS/Vanadium",
+    "platforms": [
+      "android"
+    ]
+  },
+  {
+    "project": "ByeDPI",
+    "file": "byedpi-LICENSE.txt",
+    "sha256": "18c854c6c25dffefe4b522cf1bdf5d15278a25ca785948258bddb94393f575eb",
+    "revision": "7efde1b1296eaaa187b70e951894dde17527489c",
+    "source_path": "LICENSE",
+    "repository": "https://github.com/hufrea/byedpi",
+    "platforms": [
+      "windows",
+      "android"
+    ]
+  }
+]

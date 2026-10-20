@@ -116,7 +116,7 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
     directory = checkout / 'chrome/browser/internet_browser'
     if directory.exists() and any(directory.iterdir()):
         raise ValueError('Refusing an existing Android product source overlay')
-    changes = {directory / 'resources.h': resource_header()}
+    changes = {directory / 'resources.h': resource_header(android=True)}
     for name in ('internet_browser_ui.cc', 'internet_browser_ui.h', 'transport.h', 'legacy_data.h'):
         changes[directory / name] = (ROOT / 'native/chromium/windows/overlay' / name).read_bytes()
     for path in (ROOT / 'native/chromium/common/overlay').iterdir():

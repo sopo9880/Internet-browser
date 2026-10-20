@@ -192,7 +192,11 @@ def remove_overlay(checkout: Path) -> None:
     stamp.unlink()
 
 
-def resource_header() -> bytes:
+def resource_header(android: bool = False) -> bytes:
+    try:
+        from .native_notices import license_page
+    except ImportError:
+        from native_notices import license_page
     resources = ['#ifndef CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
                  '#define CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
                  'namespace internet_browser {']
@@ -206,6 +210,10 @@ def resource_header() -> bytes:
     if ')IBRESOURCE"' in logo:
         raise ValueError('Unexpected raw-string delimiter in product logo')
     resources.append(f'inline constexpr char kLogoSvg[] = R"IBRESOURCE({logo})IBRESOURCE";')
+    notices = license_page(android)
+    if ')IBRESOURCE"' in notices:
+        raise ValueError('Unexpected raw-string delimiter in upstream notices')
+    resources.append(f'inline constexpr char kLicensesHtml[] = R"IBRESOURCE({notices})IBRESOURCE";')
     resources.extend(['}', '#endif', ''])
     return '\n'.join(resources).encode()
 

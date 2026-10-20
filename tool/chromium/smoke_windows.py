@@ -162,6 +162,12 @@ def run(executable: Path, report_file: Path, work: Path) -> dict:
                         lambda value: bool(value) and '확인 중' not in value)
                     checks['native_product_webui'] = cdp.evaluate(page_session,
                         "document.title === 'Internet Browser' && !!document.querySelector('#dpi-form')")
+                    cdp.call('Page.navigate', {'url': 'chrome://internet-browser/licenses.html'},
+                             session=page_session)
+                    notices = eventually(lambda: cdp.evaluate(page_session,
+                        "document.querySelector('h1')?.textContent === '오픈소스 안내' && document.querySelectorAll('section').length === 2"))
+                    checks['native_upstream_notices'] = bool(notices) and cdp.evaluate(
+                        page_session, "document.body.textContent.includes('ByeDPI') && document.body.textContent.includes('Chromium')")
                     worker = eventually(lambda: next((item for item in
                         cdp.call('Target.getTargets')['targetInfos']
                         if item['type'] == 'service_worker' and
