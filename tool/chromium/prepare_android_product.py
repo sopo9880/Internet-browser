@@ -155,7 +155,7 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
         return prefix + 'source_set("configs") {' + body + 'source_set("webui") {' + suffix
     update('chrome/browser/ui/webui/BUILD.gn', config_build)
     payload = ('    asset_deps = [ "//chrome/browser/internet_browser:transport_payload",\n'
-               '                   "//chrome/browser/internet_browser:transport_license" ]\n'
+               '                   "//chrome/browser/internet_browser:transport_license_assets" ]\n'
                '    loadable_modules = [ "$root_out_dir/libciadpi.so" ]\n')
     def android_build(text):
         text = replace_once(text,
@@ -218,10 +218,14 @@ def prepare(checkout: Path, transport: Path) -> dict:
     changes[safety] = safety_text.replace(bypass, '', 1).encode()
 
     mapping: dict[str, str] = {}
+    tracked = {checkout / path for path in subprocess.check_output(
+        ['git', '-C', str(checkout), 'ls-files', '-z'], text=True).split('\0') if path}
     # Resource XML only: source identifiers and upstream copyright stay intact.
     for directory in ('chrome', 'components', 'ui'):
         for pattern in ('*.grd', '*.grdp'):
             for path in sorted((checkout / directory).rglob(pattern)):
+                if path not in tracked:
+                    continue
                 before = path.read_text(encoding='utf-8')
                 after = brand(before)
                 if before == after:
@@ -233,6 +237,8 @@ def prepare(checkout: Path, transport: Path) -> dict:
                 changes[path] = after.encode()
     for directory in ('chrome', 'components', 'ui'):
         for path in sorted((checkout / directory).rglob('*.xtb')):
+            if path not in tracked:
+                continue
             before = path.read_text(encoding='utf-8')
             after = remap_translation_ids(brand(before, xtb=True), mapping)
             if after != before:
