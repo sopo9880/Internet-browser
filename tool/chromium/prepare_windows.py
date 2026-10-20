@@ -124,6 +124,7 @@ def remove_overlay(checkout: Path) -> None:
     if head != old['product']['chromium_revision']:
         raise ValueError('Source revision changed since overlay application')
     originals: dict[Path, bytes | None] = {}
+    tracked = []
     for relative, expected in old['files'].items():
         path = overlay_path(checkout, relative)
         if digest(path) != expected:
@@ -132,6 +133,7 @@ def remove_overlay(checkout: Path) -> None:
                                    f'HEAD:{relative}'], capture_output=True)
         if original.returncode == 0:
             originals[path] = original.stdout
+            tracked.append(relative)
         elif relative.startswith('chrome/browser/internet_browser/'):
             originals[path] = None
         else:
@@ -141,6 +143,14 @@ def remove_overlay(checkout: Path) -> None:
             path.unlink()
         else:
             path.write_bytes(content)
+    # Git for Windows can retain stale CRLF/stat metadata after restoring a
+    # byte-identical blob. Refresh only the verified original tracked paths.
+    if tracked:
+        subprocess.run(['git', '-C', str(checkout), 'add', '--', *tracked], check=True)
+        staged = subprocess.check_output(['git', '-C', str(checkout), 'diff-index',
+                                           '--cached', '--name-only', 'HEAD'], text=True)
+        if staged.strip():
+            raise ValueError('Restoring exact upstream bytes unexpectedly changed the source index')
     stamp.unlink()
 
 

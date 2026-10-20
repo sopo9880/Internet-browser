@@ -11,6 +11,9 @@ $overlayPython = (Get-Command python -ErrorAction Stop).Source
 $workspacePath = [IO.Path]::GetFullPath($Workspace)
 if ($workspacePath -match '\s') { throw 'Chromium workspace path must not contain spaces.' }
 New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null
+$workspaceLock = [IO.File]::Open((Join-Path $workspacePath '.internet-browser-build.lock'),
+    [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+try {
 if ((Get-PSDrive -Name ([IO.Path]::GetPathRoot($workspacePath).TrimEnd(':\'))).Free -lt 120GB) {
     throw 'Native Chromium requires at least 120 GiB of free workspace disk.'
 }
@@ -94,3 +97,4 @@ try {
     $report | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'native-provenance.json') -Encoding utf8
     Write-Output "Native Chromium built at $out. Integration and extension runtime checks remain required."
 } finally { Pop-Location }
+} finally { $workspaceLock.Dispose() }
