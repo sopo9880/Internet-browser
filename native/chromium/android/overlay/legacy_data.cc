@@ -45,6 +45,8 @@ base::DictValue ReadLegacyData() {
   result.Set("found", normalized.FindBool("found").value_or(false));
   result.Set("bookmarks", LegacyUrls(normalized, "bookmarks"));
   result.Set("history", LegacyUrls(normalized, "history"));
+  if (const auto* settings = normalized.FindDict("settings"))
+    result.Set("settings", settings->Clone());
   return result;
 }
 

@@ -132,6 +132,9 @@ def run(executable: Path, report_file: Path, work: Path) -> dict:
         with TemporaryDirectory(prefix='native-windows-smoke-', dir=work) as temporary:
             profile = Path(temporary) / 'profile'
             profile.mkdir()
+            # Keep this fixture independent of the user's previous DPI choice.
+            (profile / 'internet-browser.json').write_text(
+                json.dumps({'enabled': False, 'preset': 'balanced'}) + '\n', encoding='utf-8')
             with (Path(temporary) / 'browser.log').open('wb') as log:
                 browser = subprocess.Popen([
                     str(executable), '--headless=new', '--disable-gpu',

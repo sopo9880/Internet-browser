@@ -4,20 +4,44 @@ const enabled = document.querySelector('#enabled');
 const preset = document.querySelector('#preset');
 const transportStatus = document.querySelector('#transport-status');
 const saveStatus = document.querySelector('#save-status');
+const customOptions = document.querySelector('#custom-options');
+const customFlags = ['split', 'disorder', 'tlsRecord', 'autoRetry', 'httpModification', 'fakePacket'];
+const customPositions = {split: 'splitValue', disorder: 'disorderValue', tlsRecord: 'tlsValue', fakePacket: 'fakeTtl'};
+const control = name => document.querySelector(`#custom-${name}`);
+function refreshCustomControls() {
+  customOptions.hidden = preset.value !== 'custom';
+  customOptions.disabled = customOptions.hidden;
+  for (const [flag, field] of Object.entries(customPositions)) {
+    control(field).disabled = !control(flag).checked;
+    control(field).required = control(flag).checked;
+  }
+}
+preset.addEventListener('change', refreshCustomControls);
+for (const flag of customFlags) control(flag).addEventListener('change', refreshCustomControls);
 try {
   const state = await sendWithPromise('internetBrowserStatus');
   enabled.checked = state.enabled ?? false;
   preset.value = state.preset ?? 'balanced';
+  for (const flag of customFlags) {
+    if (typeof state.custom?.[flag] === 'boolean') control(flag).checked = state.custom[flag];
+  }
+  for (const field of Object.values(customPositions)) {
+    if (state.custom?.[field] !== undefined) control(field).value = state.custom[field];
+  }
   transportStatus.textContent = state.status;
 } catch {
   transportStatus.textContent = '연결 상태를 불러오지 못했습니다. 페이지를 다시 열어 주세요.';
 }
+refreshCustomControls();
 document.querySelector('#dpi-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = event.currentTarget.querySelector('button');
   button.disabled = true;
   try {
-    const result = await sendWithPromise('internetBrowserSave', enabled.checked, preset.value);
+    const custom = Object.fromEntries(customFlags.map(flag => [flag, control(flag).checked]));
+    for (const field of Object.values(customPositions)) custom[field] = control(field).value;
+    custom.fakeTtl = Number(custom.fakeTtl || 8);
+    const result = await sendWithPromise('internetBrowserSave', enabled.checked, preset.value, custom);
     saveStatus.textContent = result.saved
       ? '저장했습니다. 브라우저를 완전히 종료한 뒤 다시 열어 주세요.'
       : '설정을 저장하지 못했습니다.';

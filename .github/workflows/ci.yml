@@ -35,6 +35,10 @@ jobs:
         run: |
           javac -d "$RUNNER_TEMP/legacy-codec-check" native/chromium/android/java/LegacyStringListDecoder.java tool/tests/LegacyStringListDecoderCheck.java
           java -cp "$RUNNER_TEMP/legacy-codec-check" org.chromium.chrome.browser.LegacyStringListDecoderCheck
+      - name: Verify native DPI preset and custom-option compatibility
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/dpi_options_check.cc -o "$RUNNER_TEMP/dpi-options-check"
+          "$RUNNER_TEMP/dpi-options-check"
       - name: Validate Android manifest XML
         run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get

@@ -4,9 +4,9 @@ copy("transport_payload") {
 }
 
 source_set("transport") {
-  sources = [ "transport.cc", "transport.h" ]
+  sources = [ "transport.cc", "transport.h", "dpi_options.h", "dpi_configuration.h" ]
   public_deps = [ "//base" ]
-  deps = [ "//chrome/common" ]
+  deps = [ ":legacy_data", "//chrome/common" ]
   libs = [ "ws2_32.lib" ]
 }
 

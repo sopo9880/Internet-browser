@@ -2,6 +2,8 @@
 #include <winsock2.h>
 
 #include "chrome/browser/internet_browser/transport.h"
+#include "chrome/browser/internet_browser/dpi_configuration.h"
+#include "chrome/browser/internet_browser/legacy_data.h"
 
 #include <array>
 #include <string>
@@ -48,17 +50,21 @@ base::FilePath ConfigPath() {
 base::DictValue ReadConfig() {
   std::string data;
   auto path = ConfigPath();
-  if (!path.empty() && base::ReadFileToStringWithMaxSize(path, &data, 64 * 1024)) {
-    auto value = base::JSONReader::ReadDict(data, base::JSON_PARSE_RFC);
-    if (value)
-      return std::move(*value);
+  if (!path.empty() && base::PathExists(path)) {
+    if (base::ReadFileToStringWithMaxSize(path, &data, 64 * 1024)) {
+      auto value = base::JSONReader::ReadDict(data, base::JSON_PARSE_RFC);
+      if (value && value->FindBool("enabled").has_value() && value->FindString("preset"))
+        return std::move(*value);
+    }
+    base::DictValue invalid;
+    invalid.Set("enabled", true);
+    invalid.Set("preset", "invalid");
+    return invalid;
   }
+  auto legacy = ReadLegacyData();
+  if (const auto* settings = legacy.FindDict("settings"))
+    return LegacyDpiConfiguration(*settings);
   return {};
-}
-
-bool ValidPreset(const std::string& preset) {
-  return preset == "balanced" || preset == "split" ||
-         preset == "disorder" || preset == "aggressive";
 }
 
 // An ephemeral loopback port avoids taking over another application's 1080.
@@ -120,14 +126,22 @@ void StartTransport() {
   base::AutoLock lock(state.lock);
   auto configuration = ReadConfig();
   state.enabled = configuration.FindBool("enabled").value_or(false);
-  if (auto* preset = configuration.FindString("preset");
-      preset && ValidPreset(*preset))
+  if (const auto* preset = configuration.FindString("preset"))
     state.preset = *preset;
   if (!state.enabled)
     return;
   auto* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch("proxy-server")) {
     state.status = "명령행 프록시 설정 사용 중 · 내장 ByeDPI 시작하지 않음";
+    return;
+  }
+  const auto* saved_custom = configuration.FindDict("custom");
+  base::DictValue empty_custom;
+  auto custom = ReadCustomOptions(saved_custom ? *saved_custom : empty_custom);
+  auto arguments = custom ? DpiArguments(state.preset, true, *custom) : std::nullopt;
+  if (!arguments) {
+    command_line->AppendSwitchASCII("proxy-server", "socks5://127.0.0.1:1");
+    state.status = "ByeDPI 설정 오류 · 설정을 저장한 뒤 브라우저를 다시 시작하세요.";
     return;
   }
   WSADATA data{};
@@ -152,24 +166,8 @@ void StartTransport() {
   for (const auto& argument : {"-i", "127.0.0.1", "-p"})
     engine.AppendArg(argument);
   engine.AppendArg(base::NumberToString(port));
-  engine.AppendArg("--split");
-  engine.AppendArg("1+s");
-  if (state.preset == "disorder" || state.preset == "aggressive") {
-    engine.AppendArg("--disorder");
-    engine.AppendArg("3+s");
-  }
-  if (state.preset == "balanced" || state.preset == "aggressive") {
-    engine.AppendArg("--auto");
-    engine.AppendArg("torst");
-  }
-  if (state.preset != "disorder") {
-    engine.AppendArg("--tlsrec");
-    engine.AppendArg("1+s");
-  }
-  if (state.preset == "aggressive") {
-    engine.AppendArg("--mod-http");
-    engine.AppendArg("h,d");
-  }
+  for (const auto& argument : *arguments)
+    engine.AppendArg(argument);
   state.job.Set(CreateJobObject(nullptr, nullptr));
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
   limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -218,8 +216,17 @@ base::DictValue GetStatus() {
   return result;
 }
 
-bool SaveConfiguration(bool enabled, const std::string& preset) {
+bool SaveConfiguration(bool enabled, const std::string& preset, base::DictValue custom) {
   if (!ValidPreset(preset))
+    return false;
+  base::AutoLock lock(GetState().lock);
+  if (custom.empty()) {
+    auto previous = ReadConfig();
+    if (const auto* saved = previous.FindDict("custom"))
+      custom = saved->Clone();
+  }
+  auto options = ReadCustomOptions(custom);
+  if (!options && preset == "custom")
     return false;
   auto path = ConfigPath();
   if (path.empty() || !base::CreateDirectory(path.DirName()))
@@ -227,6 +234,7 @@ bool SaveConfiguration(bool enabled, const std::string& preset) {
   base::DictValue configuration;
   configuration.Set("enabled", enabled);
   configuration.Set("preset", preset);
+  configuration.Set("custom", CustomOptionsDictionary(options.value_or(CustomDpiOptions())));
   auto contents = base::WriteJson(configuration);
   if (!contents)
     return false;

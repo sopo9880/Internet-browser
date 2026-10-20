@@ -56,6 +56,18 @@ base::DictValue ReadLegacyData() {
   // Legacy history contains URLs but no visit timestamps. Keep it accessible
   // without creating invented visits in Chromium's history database.
   result.Set("history", LegacyUrls(preferences, "history"));
+  base::DictValue settings;
+  for (const char* name : {"dpi_enabled", "dpi_options_preset", "dpi_options_split",
+       "dpi_options_split_value", "dpi_options_disorder", "dpi_options_disorder_value",
+       "dpi_options_tls", "dpi_options_tls_value", "dpi_options_auto", "dpi_options_http",
+       "dpi_options_fake", "dpi_options_ttl", "update_auto_check"}) {
+    const auto* value = preferences.Find(std::string("flutter.") + name);
+    if (!value)
+      value = preferences.Find(name);
+    if (value)
+      settings.Set(name, value->Clone());
+  }
+  result.Set("settings", std::move(settings));
   return result;
 }
 

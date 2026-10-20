@@ -67,17 +67,18 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
                         weak_factory_.GetWeakPtr(), args[0].GetString()));
   }
   void Save(const base::ListValue& args) {
-    if (args.size() != 3 || !args[0].is_string() || !args[1].is_bool() ||
-        !args[2].is_string())
+    if ((args.size() != 3 && args.size() != 4) || !args[0].is_string() || !args[1].is_bool() ||
+        !args[2].is_string() || (args.size() == 4 && !args[3].is_dict()))
       return;
     AllowJavascript();
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
-        base::BindOnce([](bool enabled, std::string preset) {
+        base::BindOnce([](bool enabled, std::string preset, base::DictValue custom) {
           base::DictValue result;
-          result.Set("saved", internet_browser::SaveConfiguration(enabled, preset));
+          result.Set("saved", internet_browser::SaveConfiguration(enabled, preset, std::move(custom)));
           return result;
-        }, args[1].GetBool(), args[2].GetString()),
+        }, args[1].GetBool(), args[2].GetString(),
+           args.size() == 4 ? args[3].GetDict().Clone() : base::DictValue()),
         base::BindOnce(&InternetBrowserHandler::Reply,
                         weak_factory_.GetWeakPtr(), args[0].GetString()));
   }

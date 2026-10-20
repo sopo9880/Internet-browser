@@ -89,9 +89,14 @@ the plain Java codec checks. Native bookmarks import is opt-in; history keeps
 its original URL-only representation without invented visit times.
 
 The Android video listing reads the original app_flutter/Videos directory.
-Custom DPI controls, applying legacy settings, full media player/library parity,
-and updater integration remain required. Source wiring and Java checks do not
-establish an integrated or release-ready Android APK.
+The shared native DPI option grammar and argument builder now preserve all four
+presets and the old custom controls, including platform-specific disorder values.
+Native configuration takes precedence; absent native settings read through the
+original DPI preferences without changing the original files. C++ compatibility
+and input-rejection checks passed, and Windows product source syntax checks passed.
+Runtime verification of these paths, mapping other legacy settings, full media
+player/library parity and updater integration remain required. Source wiring and
+Java checks do not establish an integrated or release-ready Android APK.
 
 The dedicated Linux cache has now completed source synchronization and hooks,
 291 Vanadium patches, and Titanium's pinned driver (88 changed root files).

@@ -19,7 +19,16 @@
   <section>
     <p class="eyebrow">NETWORK</p><h2>ByeDPI</h2><p>이 브라우저의 네트워크 연결에만 적용됩니다.</p>
     <form id="dpi-form"><label class="toggle"><input id="enabled" type="checkbox"> ByeDPI 사용</label>
-      <label for="preset">연결 방식</label><select id="preset"><option value="balanced">기본 (권장)</option><option value="split">분할 전송</option><option value="disorder">역순 전송</option><option value="aggressive">강화 우회</option></select>
+      <label for="preset">연결 방식</label><select id="preset" required><option value="balanced">기본 (권장)</option><option value="split">분할 전송</option><option value="disorder">역순 전송</option><option value="aggressive">강화 우회</option><option value="custom">사용자 지정</option></select>
+      <fieldset id="custom-options" hidden disabled><legend>사용자 지정 옵션</legend>
+        <div><label class="toggle"><input id="custom-split" type="checkbox" checked> 분할 전송</label><input id="custom-splitValue" aria-label="분할 위치" type="text" value="1+s" maxlength="32" pattern="-?[0-9]{1,5}(:[0-9]{1,3}){0,2}(\+[shnem]{1,3})?"></div>
+        <div><label class="toggle"><input id="custom-disorder" type="checkbox"> 역순 전송</label><input id="custom-disorderValue" aria-label="역순 위치" type="text" value="3+s" maxlength="32" pattern="-?[0-9]{1,5}(:[0-9]{1,3}){0,2}(\+[shnem]{1,3})?"></div>
+        <div><label class="toggle"><input id="custom-tlsRecord" type="checkbox" checked> TLS 레코드 분할</label><input id="custom-tlsValue" aria-label="TLS 분할 위치" type="text" value="1+s" maxlength="32" pattern="-?[0-9]{1,5}(:[0-9]{1,3}){0,2}(\+[shnem]{1,3})?"></div>
+        <label class="toggle"><input id="custom-autoRetry" type="checkbox" checked> 자동 재시도</label>
+        <label class="toggle"><input id="custom-httpModification" type="checkbox"> HTTP 헤더 변형</label>
+        <div><label class="toggle"><input id="custom-fakePacket" type="checkbox"> 가짜 패킷 사용</label><label for="custom-fakeTtl">TTL (1–64)</label><input id="custom-fakeTtl" type="number" min="1" max="64" step="1" value="8"></div>
+        <p class="muted">분할 위치 예: 1+s, 3+s, -1+e. 선택한 옵션은 이 브라우저에만 적용됩니다.</p>
+      </fieldset>
       <button type="submit">저장</button>
     </form>
     <p id="transport-status" role="status">연결 상태 확인 중…</p><p id="save-status" role="status"></p>

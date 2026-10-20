@@ -119,6 +119,9 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
     changes = {directory / 'resources.h': resource_header()}
     for name in ('internet_browser_ui.cc', 'internet_browser_ui.h', 'transport.h', 'legacy_data.h'):
         changes[directory / name] = (ROOT / 'native/chromium/windows/overlay' / name).read_bytes()
+    for path in (ROOT / 'native/chromium/common/overlay').iterdir():
+        if path.is_file():
+            changes[directory / path.name] = path.read_bytes()
     for path in (ROOT / 'native/chromium/android/overlay').iterdir():
         if path.is_file():
             changes[directory / path.name] = path.read_bytes()

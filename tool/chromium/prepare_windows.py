@@ -326,6 +326,9 @@ def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
                             '  deps = [\n    "//chrome/browser/internet_browser:ui",\n')
         return prefix + 'source_set("configs") {' + body + 'source_set("webui") {' + suffix
     update('chrome/browser/ui/webui/BUILD.gn', integrate_config_build)
+    for path in sorted((ROOT / 'native/chromium/common/overlay').glob('*')):
+        if path.is_file():
+            changes['chrome/browser/internet_browser/' + path.name] = path.read_bytes()
     for path in sorted((ROOT / 'native/chromium/windows/overlay').glob('*')):
         if path.is_file():
             changes['chrome/browser/internet_browser/' + path.name] = path.read_bytes()

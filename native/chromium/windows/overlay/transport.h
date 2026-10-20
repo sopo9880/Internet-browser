@@ -10,7 +10,8 @@ namespace internet_browser {
 void StartTransport();
 void StopTransport();
 base::DictValue GetStatus();
-bool SaveConfiguration(bool enabled, const std::string& preset);
+bool SaveConfiguration(bool enabled, const std::string& preset,
+                       base::DictValue custom = {});
 }  // namespace internet_browser
 
 #endif
