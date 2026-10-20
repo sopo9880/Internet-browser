@@ -45,6 +45,57 @@ def fingerprints(checkout: Path, before: str, after: str) -> dict[str, str]:
     return translation_id_map(checkout, wrap(before), wrap(after))
 
 
+def product_path(checkout: Path, relative: str) -> Path:
+    allowed = {
+        'chrome/android/java/AndroidManifest.xml',
+        'chrome/browser/extensions/extension_safety_check_utils.cc',
+        'chrome/browser/chrome_browser_main_android.cc', 'chrome/browser/BUILD.gn',
+        'chrome/browser/ui/webui/chrome_web_ui_configs.cc', 'chrome/browser/ui/webui/BUILD.gn',
+        'chrome/android/BUILD.gn', 'chrome/android/chrome_java_sources.gni',
+        'chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java',
+        'chrome/android/java/src/org/chromium/chrome/browser/InternetBrowserLegacySnapshot.java',
+        'chrome/android/java/src/org/chromium/chrome/browser/LegacyStringListDecoder.java',
+        'chrome/android/java/src/org/chromium/chrome/browser/homepage/HomepageManager.java',
+        'chrome/browser/internet_browser/BUILD.gn',
+        'chrome/browser/internet_browser/libciadpi.so',
+        'chrome/browser/internet_browser/LICENSE-byeDPI.txt',
+    }
+    resource = re.fullmatch(r'(?:chrome|components)/[A-Za-z0-9_./-]+\.(?:grd|grdp|xtb)', relative)
+    icon = re.fullmatch(r'chrome/android/java/res_titanium_base/[A-Za-z0-9_/-]+\.(?:png|xml)', relative)
+    owned = re.fullmatch(r'chrome/browser/internet_browser/[a-z_]+\.(?:cc|h)', relative)
+    if relative not in allowed and not (resource or icon or owned):
+        raise ValueError('Unexpected Android product overlay path')
+    path = (checkout / relative).resolve()
+    if not path.is_relative_to(checkout) or '\\' in relative or '..' in Path(relative).parts:
+        raise ValueError('Android overlay path escapes its source workspace')
+    return path
+
+
+def remove_product_overlay(checkout: Path) -> None:
+    checkout = checkout.resolve(strict=True)
+    stamp = checkout / '.internet-browser-android-overlay.json'
+    if not stamp.exists():
+        return
+    report = json.loads(stamp.read_text(encoding='utf-8'))
+    head = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
+    if head != report.get('source_revision'):
+        raise ValueError('Android source revision changed since product application')
+    originals = {}
+    for relative, expected in report['files'].items():
+        path = product_path(checkout, relative)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f'Android overlay contains subsequent edits: {relative}')
+        original = subprocess.run(['git', '-C', str(checkout), 'show', 'HEAD:' + relative], capture_output=True)
+        originals[path] = original.stdout if original.returncode == 0 else None
+    # Validate the entire overlay before restoring or deleting any owned file.
+    for path, data in originals.items():
+        if data is None:
+            path.unlink()
+        else:
+            path.write_bytes(data)
+    stamp.unlink()
+
+
 def native_changes(checkout: Path, transport: Path) -> dict[Path, bytes]:
     binary = transport.read_bytes()
     provenance = json.loads(transport.with_name('transport-provenance.json').read_text(encoding='utf-8'))
@@ -213,9 +264,12 @@ def prepare(checkout: Path, transport: Path) -> dict:
         '<bitmap xmlns:android="http://schemas.android.com/apk/res/android" '
         'android:src="@mipmap/app_icon" android:gravity="center"/>\n').encode()
     for path, data in changes.items():
+        product_path(checkout, path.relative_to(checkout).as_posix())
+    for path, data in changes.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-    report = {'product': PRODUCT, 'files': {
+    report = {'product': PRODUCT, 'source_revision': subprocess.check_output(
+        ['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip(), 'files': {
         path.relative_to(checkout).as_posix(): hashlib.sha256(data).hexdigest()
         for path, data in changes.items()}, 'translation_ids_remapped': len(mapping),
         'external_extension_safety_bypass_removed': True,
@@ -228,7 +282,14 @@ def prepare(checkout: Path, transport: Path) -> dict:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkout', type=Path, required=True)
-    parser.add_argument('--transport', type=Path, required=True)
+    parser.add_argument('--transport', type=Path)
+    parser.add_argument('--remove', action='store_true')
     args = parser.parse_args()
+    if args.remove:
+        remove_product_overlay(args.checkout.resolve())
+        print('Removed only the exact hash-verified Android product overlay.')
+        raise SystemExit(0)
+    if args.transport is None:
+        parser.error('--transport is required when applying the product overlay')
     result = prepare(args.checkout.resolve(), args.transport.resolve())
     print(f"Prepared Android product overlay ({len(result['files'])} files). APK validation remains required.")

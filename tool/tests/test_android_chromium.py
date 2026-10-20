@@ -1,7 +1,9 @@
 """Brand text must preserve translations, markup and upstream attribution."""
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from tool.chromium.prepare_android_product import brand
+from tool.chromium.prepare_android_product import brand, product_path
 from tool.chromium.titanium_product import prepare_source, PRODUCT_PACKAGE, RESEARCH_PACKAGE
 from tool.tests.test_titanium_product import ARGS, BUILD, METADATA
 from tool.chromium.prepare_android_hooks import configuration, HOOK_ACTION
@@ -9,6 +11,16 @@ from tool.chromium.prepare_titanium_patches import branded_patch, selected
 
 
 class AndroidProductOverlayTests(unittest.TestCase):
+    def test_product_cleanup_cannot_escape_or_touch_unrelated_sources(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for path in ('../outside.cc', '/etc/passwd', 'chrome/browser/passwords.cc',
+                         'chrome/../../outside.grd', 'chrome\\app\\outside.grd'):
+                with self.subTest(path=path), self.assertRaises(ValueError):
+                    product_path(root, path)
+            self.assertEqual(product_path(root, 'chrome/browser/internet_browser/transport.cc'),
+                             root / 'chrome/browser/internet_browser/transport.cc')
+
     def test_patch_branding_preserves_original_attribution(self):
         data = b'+// Copyright The Vanadium Authors\n+class VanadiumConfig {}\n'
         result = branded_patch(data)
