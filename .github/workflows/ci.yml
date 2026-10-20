@@ -189,11 +189,20 @@ jobs:
           python -m pip install -r tool/chromium/requirements-windows.txt || exit /b 1
           if not defined NATIVE_WORKSPACE set "NATIVE_WORKSPACE=%RUNNER_TEMP%\internet-browser-native-win"
           python tool/chromium/build_windows.py --workspace "%NATIVE_WORKSPACE%" --jobs 3 --stage build/native-windows
-      - name: Controlled native MV3 fixture smoke (not AdBlock acceptance)
+      - name: Prepare an isolated runtime from the exact installer archive
+        id: native_runtime
         shell: cmd
         env:
-          NATIVE_CHROME_EXE: ${{ steps.native_build.outputs.chrome_exe }}
-        run: python tool/chromium/smoke_windows.py --exe "%NATIVE_CHROME_EXE%" --report build/native-windows/windows-smoke.json --work build/native-windows-smoke
+          NATIVE_EXTRACTOR: ${{ steps.native_build.outputs.extractor }}
+        run: |
+          python tool/chromium/prepare_windows_runtime.py --build build/native-windows --runtime build/native-windows-runtime --extractor "%NATIVE_EXTRACTOR%" || exit /b 1
+          copy build\native-windows-runtime\runtime-provenance.json build\native-windows\runtime-provenance.json
+      - name: Controlled packaged-native fixture and media smoke (not AdBlock acceptance)
+        shell: cmd
+        env:
+          NATIVE_CHROME_EXE: ${{ steps.native_runtime.outputs.chrome_exe }}
+          NATIVE_MEDIA_FIXTURE: ${{ steps.native_build.outputs.media_fixture }}
+        run: python tool/chromium/smoke_windows.py --exe "%NATIVE_CHROME_EXE%" --media-fixture "%NATIVE_MEDIA_FIXTURE%" --report build/native-windows/windows-smoke.json --work build/native-windows-smoke
       - uses: actions/upload-artifact@v4
         with:
           name: native-windows-v022-development-not-release

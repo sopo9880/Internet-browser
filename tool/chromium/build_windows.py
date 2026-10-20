@@ -158,6 +158,8 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
         if os.environ.get('GITHUB_OUTPUT'):
             with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as outputs:
                 outputs.write(f'chrome_exe={output / "chrome.exe"}\n')
+                outputs.write(f'extractor={source / "third_party/lzma_sdk/bin/win64/7za.exe"}\n')
+                outputs.write(f'media_fixture={source / "media/test/data/bear-320x240.webm"}\n')
         print('Native Chromium compiled. Runtime/AdBlock/release acceptance remains required.')
 
 

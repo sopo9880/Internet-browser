@@ -237,6 +237,24 @@ download and lookup/playback checks; those new executable checks have not run.
 Android scoped-storage access, history/restart behavior, codecs and privacy state
 writes still require native runtime/device acceptance.
 
+`adblock_probe.py` reverified the real 6.50.0 CRX developer/Web Store publisher
+signatures and selected enabled vendor ruleset
+`8C13E995-8F06-4927-BEA7-6C845FB7EEBF`, block rule 779252 (`/ads/!rotator/`).
+Its loopback server serves both a control script and a matching request; it adds
+no filtering rules or substitute extension. Server/selection tests passed, but
+store installation, real worker/DNR, popup, enable/disable, update/removal,
+restart persistence and ByeDPI operation remain unverified.
+
+Windows CI now prepares its test runtime from the exact `chrome.7z` whose hash
+matches native build provenance. The helper rejects escaping/linked/colliding
+archive paths, retains the installer layout and copies version files beside the
+launcher, verifies the packaged launcher, checks required resources/transport,
+and fingerprints every copied file. This copy keeps tests independent of later
+compiler writes. A pinned-7za synthetic archive check and path-rejection tests
+passed. The real installer archive has not completed, so the packaged app has
+not been launched by this new path; OS installer execution is also separate.
+The runtime fixture/media smoke continues to keep AdBlock acceptance false.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;
