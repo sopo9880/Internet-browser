@@ -116,6 +116,7 @@ def controlled_server():
 
 def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | None = None) -> dict:
     executable = executable.resolve(strict=True)
+    work = work.resolve()
     work.mkdir(exist_ok=True, parents=True)
     report = {
         'kind': 'NATIVE_WINDOWS_CONTROLLED_FIXTURE_SMOKE',
