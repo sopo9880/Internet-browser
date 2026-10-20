@@ -39,19 +39,29 @@ def prepare(source: Path) -> None:
     if revision != SOURCE_SHA:
         raise ValueError('Unpinned Titanium source')
     upstream = source / '.gclient'
-    config = configuration(upstream.read_text(encoding='utf-8'))
+    upstream_bytes = subprocess.check_output(['git', '-C', str(source), 'show', 'HEAD:.gclient'])
+    if upstream.read_bytes() != upstream_bytes:
+        raise ValueError('Pinned upstream hook configuration contains edits')
+    config = configuration(upstream_bytes.decode('utf-8'))
     destination = source / 'chromium/.gclient'
     if not destination.parent.is_dir():
         raise ValueError('Chromium source workspace has not been prepared')
     distribution = source / 'extensions/dist'
-    if distribution.exists() and any(distribution.iterdir()):
-        raise ValueError('Product helper payload must start empty; refusing existing CRX payloads')
+    template = subprocess.check_output(['git', '-C', str(source), 'show', 'HEAD:extensions/BUILD.gn'])
+    expected = {'BUILD.gn': template, 'bundled.json': b'{}\n'}
+    if distribution.exists():
+        for path in distribution.iterdir():
+            if path.name not in expected or not path.is_file() or path.read_bytes() != expected[path.name]:
+                raise ValueError('Unexpected existing product helper payload; refusing CRX files')
     distribution.mkdir(parents=True, exist_ok=True)
-    (distribution / 'BUILD.gn').write_bytes((source / 'extensions/BUILD.gn').read_bytes())
+    (distribution / 'BUILD.gn').write_bytes(template)
     (distribution / 'bundled.json').write_text('{}\n', encoding='utf-8')
-    destination.write_text(''.join(
+    configured = ''.join(
         name + ' = ' + pprint.pformat(value, sort_dicts=False) + '\n'
-        for name, value in config.items()), encoding='utf-8')
+        for name, value in config.items())
+    if destination.exists() and destination.read_text(encoding='utf-8') not in (upstream_bytes.decode('utf-8'), configured):
+        raise ValueError('Existing Chromium hook configuration contains unknown edits')
+    destination.write_text(configured, encoding='utf-8')
     print('Product hooks prepared: no automatic Titanium helper installation. AdBlock remains a user-controlled store installation.')
 
 
