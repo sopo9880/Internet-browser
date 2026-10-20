@@ -19,7 +19,7 @@ if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
   echo "Chromium source builder requires Linux x86_64" >&2
   exit 2
 fi
-for cmd in git python3 java keytool openssl base64 sudo; do
+for cmd in git python3 java keytool openssl base64; do
   command -v "$cmd" >/dev/null || {
     echo "Missing required Linux build command: $cmd" >&2
     exit 2
@@ -32,16 +32,10 @@ fi
 
 python3 "$SCRIPT_DIR/titanium_pin.py"
 mkdir -p "$WORKSPACE"
-AVAILABLE="$(df -Pk "$WORKSPACE" | awk 'END {print $4}')"
-if [ "$AVAILABLE" -lt 120000000 ]; then
-  echo "Chromium engine source build requires ~120 GB free disk" >&2
-  exit 2
-fi
-RAM_KIB="$(awk '/MemTotal:/ {print $2}' /proc/meminfo)"
-if [ "$RAM_KIB" -lt 30000000 ]; then
-  echo "Chromium engine builder needs at least 32 GB RAM" >&2
-  exit 2
-fi
+CHROMIUM_NINJA_JOBS="${CHROMIUM_NINJA_JOBS:-3}"
+CHROMIUM_SYNC_JOBS="${CHROMIUM_SYNC_JOBS:-2}"
+python3 "$SCRIPT_DIR/build_resources.py" --workspace "$WORKSPACE" \
+  --ninja-jobs "$CHROMIUM_NINJA_JOBS" --sync-jobs "$CHROMIUM_SYNC_JOBS"
 
 git clone --no-checkout https://github.com/jqssun/android-titanium-browser.git "$WORKSPACE/titanium"
 git -C "$WORKSPACE/titanium" fetch --depth=1 origin "$SOURCE_SHA"
@@ -62,33 +56,13 @@ python3 "$SCRIPT_DIR/pack_welcome_crx.py" \
   --key "$WORKSPACE/welcome-crx-research-private.pem"
 
 
-# Private research install identity; NEVER replace the signed v0.1.1 app.
-python3 - "$WORKSPACE/titanium/args.gn" "$WORKSPACE/titanium/build.sh" "$APP_PACKAGE" <<'PY'
-from pathlib import Path
-import sys
-gn_path, build_path, package = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-args = gn_path.read_text(encoding="utf-8")
-old_package = 'chrome_public_manifest_package = "io.github.jqssun.helium"'
-old_cpu = 'target_cpu = "arm"'
-if args.count(old_package) != 1 or args.count(old_cpu) != 1:
-    raise SystemExit("Titanium Android GN build template changed; review upstream")
-args = args.replace(old_package, f'chrome_public_manifest_package = "{package}"')
-args = args.replace(old_cpu, 'target_cpu = "arm64"')
-gn_path.write_text(args, encoding="utf-8")
-
-build = build_path.read_text(encoding="utf-8")
-arm_block = (
-    "autoninja -C out/Default chrome_public_apk\n"
-    "mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-armeabi-v7a.apk\n"
-    "sed -i 's/target_cpu = \"arm\"/target_cpu = \"arm64\"/' out/Default/args.gn\n"
-)
-arm_sign = "sign_apk out/tmp/$VERSION-armeabi-v7a.apk out/release/$VERSION-armeabi-v7a.apk\n"
-if build.count(arm_block) != 1 or build.count(arm_sign) != 1:
-    raise SystemExit("Titanium build.sh layout changed; cannot safely isolate ARM64")
-build = build.replace(arm_block, "# ARM64-only isolated research build\n")
-build = build.replace(arm_sign, "")
-build_path.write_text(build, encoding="utf-8")
-PY
+# Keep the research identity isolated while using the same checked source
+# transformation and constrained resource limits as native product candidates.
+python3 "$SCRIPT_DIR/titanium_product.py" configure \
+  --args "$WORKSPACE/titanium/args.gn" \
+  --build "$WORKSPACE/titanium/build.sh" --package "$APP_PACKAGE" \
+  --ninja-jobs "$CHROMIUM_NINJA_JOBS" --sync-jobs "$CHROMIUM_SYNC_JOBS" \
+  --preprovisioned-deps
 
 # Ephemeral signing keys. This is NOT the Internet-browser production key.
 # Avoid loading any repository signing secret into third-party Chromium builds.
@@ -104,8 +78,9 @@ export LOCAL_TEST_JKS="$(base64 -w0 "$WORKSPACE/local.properties")"
 export STORE_TEST_JKS="$(base64 -w0 "$WORKSPACE/prototype.jks")"
 unset PASSWORD
 
-# The source-pinned upstream build requires system dependencies and runs apt.
-# Do not execute on a shared or developer workstation.
+# git am runs only in the dedicated checkout. Keep identity scoped to this job.
+export GIT_COMMITTER_NAME="Internet-browser Chromium Build"
+export GIT_COMMITTER_EMAIL="internet-browser-ci@users.noreply.github.com"
 cd "$WORKSPACE/titanium"
 bash build.sh
 unset LOCAL_TEST_JKS STORE_TEST_JKS

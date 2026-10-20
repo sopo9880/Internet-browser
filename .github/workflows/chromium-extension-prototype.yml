@@ -11,8 +11,11 @@ jobs:
     # Enable by applying the 'chromium-build' PR label when a suitable
     # isolated self-hosted runner is registered. No production credentials.
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'chromium-build')
-    runs-on: [self-hosted, linux, x64, chromium-large]
-    timeout-minutes: 360
+    runs-on: [self-hosted, linux, x64, chromium-wsl2]
+    concurrency:
+      group: internet-browser-local-native-compile
+      cancel-in-progress: false
+    timeout-minutes: 1440
     steps:
       - uses: actions/checkout@v4
       - name: Check trusted source pin and build script

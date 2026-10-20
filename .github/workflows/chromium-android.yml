@@ -16,7 +16,10 @@ permissions:
   contents: read
 jobs:
   chromium_android_baseline:
-    runs-on: [self-hosted, linux, x64, chromium-large]
+    runs-on: [self-hosted, linux, x64, chromium-wsl2]
+    concurrency:
+      group: internet-browser-local-native-compile
+      cancel-in-progress: false
     timeout-minutes: 240
     env:
       CHROMIUM_REVISION: ${{ inputs.chromium_revision }}
