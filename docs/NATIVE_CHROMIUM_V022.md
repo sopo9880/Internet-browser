@@ -201,6 +201,23 @@ key cleanup and refusal to overwrite an existing release APK. These do not prove
 a real APK is signed. The production workflow remains unexecuted: the migration
 is not merged and native/release version metadata does not yet match.
 
+The library now supports editing displayed titles through a browser-side lookup
+of an existing library URL. Native title and playback updates merge under the
+same state-file lock, so playback cannot overwrite an edited title and a
+title-only edit preserves the legacy resume fallback. Names are normalized and
+bounded without modifying the original media file or `library.json`. Filename
+fallback titles omit the extension. Compiler syntax checks and renderer checks
+for cancellation/literal title display passed; native file-state behavior is
+still pending product runtime validation.
+
+The Windows native smoke harness now seeds temporary preferences, bookmark and
+video-library fixtures instead of reading personal legacy directories. Directory
+overrides require Chromium's explicit `--test-type` and cannot come from renderer
+messages. Planned executable checks cover actual bookmark import/deduplication,
+title writes, legacy resume, saved-position reopen, and unchanged original
+preference/library bytes. This extended native smoke has not yet run against the
+newly built product. The real AdBlock acceptance flags remain separately false.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;

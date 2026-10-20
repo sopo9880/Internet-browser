@@ -104,7 +104,23 @@ try {
         document.querySelector('#video-status').textContent = '영상을 열지 못했습니다.';
       }
     });
-    item.append(link);
+    const rename = document.createElement('button');
+    rename.type = 'button'; rename.className = 'secondary rename-video';
+    rename.textContent = '이름 변경';
+    rename.addEventListener('click', async () => {
+      const title = prompt('영상 제목', link.textContent);
+      if (title === null) return;
+      rename.disabled = true;
+      try {
+        const result = await sendWithPromise('internetBrowserRenameVideo', url.href, title);
+        if (result.saved) {
+          link.textContent = result.title;
+          document.querySelector('#video-status').textContent = '제목을 저장했습니다.';
+        } else document.querySelector('#video-status').textContent = '제목을 저장하지 못했습니다. 제목과 파일 상태를 확인해 주세요.';
+      } catch {document.querySelector('#video-status').textContent = '제목을 저장하지 못했습니다.';}
+      finally {rename.disabled = false;}
+    });
+    item.append(link, document.createTextNode(' '), rename);
     document.querySelector('#videos').append(item);
   }
 } catch {

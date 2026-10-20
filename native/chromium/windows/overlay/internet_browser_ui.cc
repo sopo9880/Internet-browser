@@ -11,6 +11,7 @@
 #include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/internet_browser/legacy_data.h"
 #include "chrome/browser/internet_browser/video_player.h"
+#include "chrome/browser/internet_browser/video_metadata.h"
 #include "chrome/browser/internet_browser/transport.h"
 #include "chrome/browser/internet_browser/updater.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -42,6 +43,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
     web_ui()->RegisterMessageCallback("internetBrowserLegacy",
         base::BindRepeating(&InternetBrowserHandler::Legacy,
                              base::Unretained(this)));
+    web_ui()->RegisterMessageCallback("internetBrowserRenameVideo",
+        base::BindRepeating(&InternetBrowserHandler::RenameVideo, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserVideos",
         base::BindRepeating(&InternetBrowserHandler::Videos,
                              base::Unretained(this)));
@@ -121,6 +124,30 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
         base::BindOnce(&internet_browser::ReadVideoLibrary, VideoStateFile()),
         base::BindOnce(&InternetBrowserHandler::Reply,
                         weak_factory_.GetWeakPtr(), args[0].GetString()));
+  }
+  void RenameVideo(const base::ListValue& args) {
+    if (args.size() != 3 || !args[0].is_string() || !args[1].is_string() || !args[2].is_string()) return;
+    AllowJavascript();
+    base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
+        base::BindOnce([](base::FilePath state, std::string requested, std::string title) {
+          auto library = internet_browser::ReadVideoLibrary(state);
+          base::DictValue result;
+          if (const auto* videos = library.FindList("videos")) {
+            for (const auto& video : *videos) {
+              const auto& item = video.GetDict();
+              const auto* url = item.FindString("url");
+              const auto* name = item.FindString("name");
+              if (url && name && *url == requested) {
+                result.Set("saved", internet_browser::SaveVideoTitle(state, *name, title));
+                result.Set("title", internet_browser::NormalizeVideoTitle(title));
+                return result;
+              }
+            }
+          }
+          result.Set("saved", false);
+          return result;
+        }, VideoStateFile(), args[1].GetString(), args[2].GetString()),
+        base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString()));
   }
   void ImportBookmarks(const base::ListValue& args) {
     if (args.size() != 1 || !args[0].is_string())

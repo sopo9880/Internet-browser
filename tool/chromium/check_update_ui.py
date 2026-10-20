@@ -43,7 +43,8 @@ def run(browser, work):
                 calls.push([name,...args]);
                 if(name==='internetBrowserStatus')return {enabled:false,status:'테스트'};
                 if(name==='internetBrowserLegacy')return {found:false,settings:{update_auto_check:false}};
-                if(name==='internetBrowserVideos')return {videos:[]};
+                if(name==='internetBrowserVideos')return {videos:[{title:'Saved example',url:'file:///controlled/sample.webm'}]};
+                if(name==='internetBrowserRenameVideo')return {saved:true,title:args[1].trim()};
                 if(name==='internetBrowserUpdate'){
                   if(args[0]==='check')return {available:true,canInstall:true,version:'0.3.0',tag:'v0.3.0',description:'<img src=x onerror=alert(1)>',releasePage:'https://github.com/sopo9880/Internet-browser/releases/tag/v0.3.0',android:false};
                   if(args[0]==='download')return failDownload?{error:'SHA-256 mismatch'}:{verified:true};
@@ -53,6 +54,11 @@ def run(browser, work):
               };''')
             source=(resources/'app.js').read_text(encoding='utf-8').split('\n',1)[1]
             evaluate('(async()=>{'+source+'\n})()')
+            evaluate("globalThis.prompt=()=>null;document.querySelector('.rename-video').click()")
+            checks['rename_cancel_keeps_original'] = evaluate("!calls.some(x=>x[0]==='internetBrowserRenameVideo')&&document.querySelector('#videos button').textContent==='Saved example'")
+            evaluate("globalThis.prompt=()=>'<img src=x> 새 제목';document.querySelector('.rename-video').click()")
+            eventually(lambda:evaluate("document.querySelector('#videos button').textContent==='<img src=x> 새 제목'"))
+            checks['renamed_title_is_literal'] = evaluate("!document.querySelector('#videos img')&&calls.some(x=>x[0]==='internetBrowserRenameVideo'&&x[1]==='file:///controlled/sample.webm')")
             checks['legacy_auto_check_choice'] = evaluate("!document.querySelector('#update-auto').checked && !calls.some(x=>x[0]==='internetBrowserUpdate')")
             evaluate("document.querySelector('#update-check').click()")
             eventually(lambda:evaluate("!document.querySelector('#update-release').hidden"))

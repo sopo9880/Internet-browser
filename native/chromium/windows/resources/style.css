@@ -3,3 +3,5 @@
 [hidden]{display:none!important}#custom-options{flex-basis:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;padding:20px;border:1px solid var(--line);border-radius:10px}#custom-options>div{display:flex;gap:10px;align-items:center;flex-wrap:wrap}#custom-options p{grid-column:1/-1}#custom-options input[type=text],#custom-options input[type=number]{width:130px;height:auto;padding:8px;font:inherit;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--fg)}@media(max-width:600px){#custom-options{grid-template-columns:1fr}}
 
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 ui-monospace,Consolas,monospace}
+
+#videos{list-style:none;padding:0}#videos li{display:flex;align-items:center;gap:10px;margin:12px 0}#videos li>button:first-child{white-space:normal;overflow-wrap:anywhere;text-align:left;flex:1;min-width:0}#videos .rename-video{flex:none}

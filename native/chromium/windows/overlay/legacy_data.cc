@@ -1,5 +1,6 @@
 #include "chrome/browser/internet_browser/legacy_data.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
+#include "chrome/browser/internet_browser/legacy_test_paths.h"
 
 #include <set>
 #include <string>
@@ -47,10 +48,12 @@ base::ListValue LegacyUrls(const base::DictValue& data, const std::string& key) 
 base::DictValue ReadLegacyData() {
   base::DictValue result;
   base::FilePath roaming;
-  if (!base::PathService::Get(base::DIR_ROAMING_APP_DATA, &roaming))
-    return result;
-  const auto file = roaming.AppendASCII("io.github.sopo9880")
-      .AppendASCII("internet_browser").AppendASCII("shared_preferences.json");
+  base::FilePath fallback;
+  if (base::PathService::Get(base::DIR_ROAMING_APP_DATA, &roaming))
+    fallback = roaming.AppendASCII("io.github.sopo9880").AppendASCII("internet_browser");
+  const auto directory = NativeFixtureDirectory("internet-browser-test-legacy-directory", fallback);
+  if (directory.empty()) return result;
+  const auto file = directory.AppendASCII("shared_preferences.json");
   auto preferences = ReadDictionary(file);
   result.Set("found", !preferences.empty());
   result.Set("bookmarks", LegacyUrls(preferences, "bookmarks"));
@@ -77,11 +80,13 @@ base::DictValue ReadVideoLibrary(const base::FilePath& state_file) {
   base::DictValue result;
   base::ListValue videos;
   base::FilePath documents;
-  if (!chrome::GetUserDocumentsDirectory(&documents)) {
+  base::FilePath fallback;
+  if (chrome::GetUserDocumentsDirectory(&documents)) fallback = documents.AppendASCII("Videos");
+  const auto directory = NativeFixtureDirectory("internet-browser-test-library", fallback);
+  if (directory.empty()) {
     result.Set("videos", std::move(videos));
     return result;
   }
-  auto directory = documents.AppendASCII("Videos");
   auto metadata = ReadDictionary(directory.AppendASCII("library.json"));
   auto native = ReadVideoState(state_file);
   const auto* entries = metadata.FindDict("items");
@@ -95,7 +100,7 @@ base::DictValue ReadVideoLibrary(const base::FilePath& state_file) {
       continue;
     base::DictValue item;
     std::string name = path.BaseName().AsUTF8Unsafe();
-    item.Set("title", name);
+    item.Set("title", path.BaseName().RemoveExtension().AsUTF8Unsafe());
     item.Set("url", net::FilePathToFileURL(path).spec());
     AddVideoMetadata(item, name, entries ? entries->FindDict(name) : nullptr, native);
     videos.Append(std::move(item));

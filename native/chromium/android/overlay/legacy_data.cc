@@ -1,5 +1,6 @@
 #include "chrome/browser/internet_browser/legacy_data.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
+#include "chrome/browser/internet_browser/legacy_test_paths.h"
 
 #include <set>
 #include <string>
@@ -42,7 +43,9 @@ base::DictValue ReadLegacyData() {
   base::FilePath data;
   if (!base::android::GetDataDirectory(&data))
     return result;
-  auto normalized = ReadDictionary(data.AppendASCII("internet-browser-legacy.json"));
+  const auto directory = NativeFixtureDirectory("internet-browser-test-legacy-directory", data);
+  if (directory.empty()) return result;
+  auto normalized = ReadDictionary(directory.AppendASCII("internet-browser-legacy.json"));
   result.Set("found", normalized.FindBool("found").value_or(false));
   result.Set("bookmarks", LegacyUrls(normalized, "bookmarks"));
   result.Set("history", LegacyUrls(normalized, "history"));
@@ -61,7 +64,12 @@ base::DictValue ReadVideoLibrary(const base::FilePath& state_file) {
   }
   // Flutter's Android documents directory is app_flutter, beside app_chrome.
   // Retain its original files and metadata; never move or overwrite videos.
-  auto directory = data.DirName().AppendASCII("app_flutter").AppendASCII("Videos");
+  const auto directory = NativeFixtureDirectory("internet-browser-test-library",
+      data.DirName().AppendASCII("app_flutter").AppendASCII("Videos"));
+  if (directory.empty()) {
+    result.Set("videos", std::move(videos));
+    return result;
+  }
   auto metadata = ReadDictionary(directory.AppendASCII("library.json"));
   auto native = ReadVideoState(state_file);
   const auto* entries = metadata.FindDict("items");
@@ -75,7 +83,7 @@ base::DictValue ReadVideoLibrary(const base::FilePath& state_file) {
       continue;
     std::string name = path.BaseName().AsUTF8Unsafe();
     base::DictValue item;
-    item.Set("title", name);
+    item.Set("title", path.BaseName().RemoveExtension().AsUTF8Unsafe());
     item.Set("url", net::FilePathToFileURL(path).spec());
     AddVideoMetadata(item, name, entries ? entries->FindDict(name) : nullptr, native);
     videos.Append(std::move(item));

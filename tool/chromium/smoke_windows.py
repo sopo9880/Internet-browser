@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import subprocess
+import shutil
 from tempfile import TemporaryDirectory
 from threading import Lock, Thread
 import time
@@ -51,9 +52,9 @@ class Cdp:
                 raise RuntimeError(f'{method}: {response["error"]}')
             return response.get('result', {})
 
-    def evaluate(self, session: str, expression: str):
+    def evaluate(self, session: str, expression: str, *, user_gesture: bool = False):
         response = self.call('Runtime.evaluate', {
-            'expression': expression, 'awaitPromise': True, 'returnByValue': True,
+            'expression': expression, 'awaitPromise': True, 'returnByValue': True, 'userGesture': user_gesture,
         }, session=session)
         if 'exceptionDetails' in response:
             raise RuntimeError(str(response['exceptionDetails']))
@@ -113,7 +114,7 @@ def controlled_server():
         thread.join(timeout=5)
 
 
-def run(executable: Path, report_file: Path, work: Path) -> dict:
+def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | None = None) -> dict:
     executable = executable.resolve(strict=True)
     work.mkdir(exist_ok=True, parents=True)
     report = {
@@ -135,10 +136,26 @@ def run(executable: Path, report_file: Path, work: Path) -> dict:
             # Keep this fixture independent of the user's previous DPI choice.
             (profile / 'internet-browser.json').write_text(
                 json.dumps({'enabled': False, 'preset': 'balanced'}) + '\n', encoding='utf-8')
-            with (Path(temporary) / 'browser.log').open('wb') as log:
+            library = Path(temporary) / 'Videos'
+            legacy = Path(temporary) / 'legacy'
+            library.mkdir(); legacy.mkdir()
+            fixture = media_fixture or executable.parents[2] / 'media/test/data/bear-320x240.webm'
+            shutil.copyfile(fixture, library / 'sample.webm')
+            old_library = json.dumps({'version': 1, 'items': {'sample.webm': {
+                'title': 'Saved fixture', 'lastPositionMs': 1000}}}).encode()
+            old_preferences = json.dumps({'flutter.bookmarks': ['https://example.test/bookmark'],
+                'flutter.history': ['https://example.test/visit'], 'flutter.update_auto_check': False}).encode()
+            (library / 'library.json').write_bytes(old_library)
+            (legacy / 'shared_preferences.json').write_bytes(old_preferences)
+            def saved_video():
+                files = list(profile.glob('*/internet-browser-video-state.json'))
+                return json.loads(files[0].read_text()).get('sample.webm', {}) if files else {}
+            with (work / f'native-browser-{time.time_ns()}.log').open('wb') as log:
                 browser = subprocess.Popen([
                     str(executable), '--headless=new', '--disable-gpu',
                     '--no-first-run', '--no-default-browser-check',
+                    '--test-type=browser', f'--internet-browser-test-library={library}',
+                    f'--internet-browser-test-legacy-directory={legacy}',
                     '--disable-background-networking', '--remote-debugging-port=0',
                     '--remote-debugging-address=127.0.0.1',
                     f'--user-data-dir={profile}', f'--load-extension={FIXTURE.resolve()}',
@@ -162,6 +179,18 @@ def run(executable: Path, report_file: Path, work: Path) -> dict:
                         lambda value: bool(value) and '확인 중' not in value)
                     checks['native_product_webui'] = cdp.evaluate(page_session,
                         "document.title === 'Internet Browser' && !!document.querySelector('#dpi-form')")
+                    eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Saved fixture'"))
+                    cdp.evaluate(page_session, "window.prompt = () => 'Renamed fixture'; document.querySelector('.rename-video').click()")
+                    eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Renamed fixture'"))
+                    checks['native_video_title_saved'] = eventually(lambda: saved_video().get('title')) == 'Renamed fixture'
+                    checks['title_edit_preserves_legacy_position_fallback'] = 'lastPositionMs' not in saved_video()
+                    def import_bookmarks():
+                        cdp.evaluate(page_session, "document.querySelector('#import-bookmarks').click()")
+                        return cdp.evaluate(page_session, "document.querySelector('#import-status').textContent")
+                    imported = eventually(import_bookmarks, lambda text: '1개의 북마크를 가져왔습니다' in text)
+                    checks['native_legacy_bookmark_import'] = bool(imported)
+                    checks['native_legacy_bookmark_dedup'] = '0개의 북마크를 가져왔습니다' in eventually(
+                        import_bookmarks, lambda text: '0개의 북마크를 가져왔습니다' in text)
                     cdp.call('Page.navigate', {'url': 'chrome://internet-browser/licenses.html'},
                              session=page_session)
                     notices = eventually(lambda: cdp.evaluate(page_session,
@@ -189,6 +218,26 @@ def run(executable: Path, report_file: Path, work: Path) -> dict:
                         'url': f'chrome-extension://{extension_id}/popup.html'}, session=page_session)
                     checks['fixture_popup_document'] = eventually(lambda: cdp.evaluate(
                         page_session, "document.querySelector('#smoke-popup')?.textContent")) == 'Native extension popup document'
+                    cdp.call('Page.navigate', {'url': 'chrome://internet-browser/'}, session=page_session)
+                    eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Renamed fixture'"))
+                    cdp.evaluate(page_session, "document.querySelector('#videos button').click()")
+                    eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player')"))
+                    cdp.evaluate(page_session, "document.querySelector('video').pause()")
+                    checks['native_player_resume_from_legacy'] = eventually(lambda: cdp.evaluate(page_session,
+                        "document.querySelector('video').readyState >= 1 && Math.abs(document.querySelector('video').currentTime - 1) < 0.4"))
+                    cdp.evaluate(page_session, "(async()=>{const video=document.querySelector('video');video.currentTime=1.4;await video.play();await new Promise(resolve=>setTimeout(resolve,200));video.pause();})()", user_gesture=True)
+                    position = eventually(lambda: saved_video().get('lastPositionMs'), lambda value: value is not None and 1250 < value < 2300)
+                    checks['native_player_position_saved'] = bool(position)
+                    checks['native_playback_preserves_edited_title'] = saved_video().get('title') == 'Renamed fixture'
+                    cdp.call('Page.navigate', {'url': 'chrome://internet-browser/'}, session=page_session)
+                    eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Renamed fixture'"))
+                    cdp.evaluate(page_session, "document.querySelector('#videos button').click()")
+                    eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player')"))
+                    cdp.evaluate(page_session, "document.querySelector('video').pause()")
+                    checks['native_player_reopen_resume'] = eventually(lambda: cdp.evaluate(page_session,
+                        f"document.querySelector('video').readyState >= 1 && Math.abs(document.querySelector('video').currentTime - {position / 1000}) < 0.5"))
+                    checks['original_library_unchanged'] = (library / 'library.json').read_bytes() == old_library
+                    checks['original_preferences_unchanged'] = (legacy / 'shared_preferences.json').read_bytes() == old_preferences
                     if not all(checks.values()):
                         raise RuntimeError('One or more controlled native smoke checks failed')
                 finally:
@@ -217,7 +266,8 @@ if __name__ == '__main__':
     parser.add_argument('--exe', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--work', required=True, type=Path)
+    parser.add_argument('--media-fixture', type=Path)
     args = parser.parse_args()
-    result = run(args.exe, args.report, args.work)
+    result = run(args.exe, args.report, args.work, args.media_fixture)
     print(json.dumps(result, ensure_ascii=True))
     raise SystemExit(1 if 'error' in result else 0)

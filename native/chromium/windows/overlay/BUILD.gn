@@ -28,7 +28,7 @@ source_set("ui") {
 }
 
 source_set("legacy_data") {
-  sources = [ "legacy_data.cc", "legacy_data.h", "video_metadata.h" ]
+  sources = [ "legacy_data.cc", "legacy_data.h", "video_metadata.h", "legacy_test_paths.h" ]
   public_deps = [ "//base" ]
   deps = [ "//chrome/common", "//net", "//url" ]
 }
