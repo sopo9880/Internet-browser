@@ -12,6 +12,7 @@
 #include "chrome/browser/internet_browser/legacy_data.h"
 #include "chrome/browser/internet_browser/video_player.h"
 #include "chrome/browser/internet_browser/transport.h"
+#include "chrome/browser/internet_browser/updater.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -30,6 +31,8 @@ namespace {
 class InternetBrowserHandler : public content::WebUIMessageHandler {
  public:
   void RegisterMessages() override {
+    web_ui()->RegisterMessageCallback("internetBrowserUpdate",
+        base::BindRepeating(&InternetBrowserHandler::Update, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserStatus",
         base::BindRepeating(&InternetBrowserHandler::Status,
                              base::Unretained(this)));
@@ -51,11 +54,27 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
   }
   void OnJavascriptDisallowed() override {
     weak_factory_.InvalidateWeakPtrs();
+    updater_.reset();
   }
  private:
   void Reply(const std::string& id, base::DictValue data) {
     if (IsJavascriptAllowed())
       ResolveJavascriptCallback(base::Value(id), data);
+  }
+  void Update(const base::ListValue& args) {
+    if (args.size() != 2 || !args[0].is_string() || !args[1].is_string()) return;
+    AllowJavascript();
+    if (!updater_) updater_ = std::make_unique<internet_browser::NativeUpdater>(Profile::FromWebUI(web_ui()));
+    auto reply = base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString());
+    const auto& command = args[1].GetString();
+    if (command == "check") updater_->Check(std::move(reply));
+    else if (command == "download") updater_->Download(std::move(reply));
+    else if (command == "install") updater_->OpenVerifiedInstaller(std::move(reply));
+    else if (command == "settings") {
+      base::DictValue result;result.Set("opened", updater_->OpenInstallSettings());std::move(reply).Run(std::move(result));
+    } else {
+      base::DictValue result;result.Set("error", "알 수 없는 업데이트 요청입니다.");std::move(reply).Run(std::move(result));
+    }
   }
   void Status(const base::ListValue& args) {
     if (args.size() != 1 || !args[0].is_string())
@@ -202,6 +221,7 @@ class InternetBrowserHandler : public content::WebUIMessageHandler {
           GURL(url), content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
     }
   }
+  std::unique_ptr<internet_browser::NativeUpdater> updater_;
   base::WeakPtrFactory<InternetBrowserHandler> weak_factory_{this};
 };
 }  // namespace

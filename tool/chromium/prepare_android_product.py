@@ -48,6 +48,8 @@ def fingerprints(checkout: Path, before: str, after: str) -> dict[str, str]:
 def product_path(checkout: Path, relative: str) -> Path:
     allowed = {
         'chrome/android/java/AndroidManifest.xml',
+        'chrome/android/java/res_template/xml/file_paths.xml',
+        'chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java',
         'chrome/browser/extensions/extension_safety_check_utils.cc',
         'chrome/browser/chrome_browser_main_android.cc', 'chrome/browser/BUILD.gn',
         'chrome/browser/ui/webui/chrome_web_ui_configs.cc', 'chrome/browser/ui/webui/BUILD.gn',
@@ -137,6 +139,14 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
             '  internet_browser::StopTransport();\n}')
         return replace_once(text, '  content::Compositor::Initialize();',
             '  internet_browser::StartTransport();\n  content::Compositor::Initialize();')
+    def updater_java(text):
+        if not text.rstrip().endswith('}'):
+            raise ValueError('Pinned PlatformUtil class boundary changed')
+        methods = (ROOT / 'native/chromium/android/java/updater_methods.java.inc').read_text(encoding='utf-8')
+        return text.rstrip()[:-1] + '\n' + methods + '\n}\n'
+    update('chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java', updater_java)
+    update('chrome/android/java/res_template/xml/file_paths.xml', lambda text: replace_once(text,
+        '</paths>', '    <cache-path name="internet_browser_updates" path="internet-browser-updates/" />\n</paths>'))
     update('chrome/browser/chrome_browser_main_android.cc', main)
     update('chrome/browser/BUILD.gn', lambda text: replace_once(text,
         '  if (is_android) {\n    sources += [\n      "after_startup_task_utils_android.cc",',

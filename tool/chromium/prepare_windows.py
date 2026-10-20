@@ -204,7 +204,8 @@ def resource_header(android: bool = False) -> bytes:
         from native_notices import license_page
     resources = ['#ifndef CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
                  '#define CHROME_BROWSER_INTERNET_BROWSER_RESOURCES_H_',
-                 'namespace internet_browser {']
+                 'namespace internet_browser {',
+                 'inline constexpr char kAppVersion[] = ' + json.dumps(PRODUCT['app_version']) + ';']
     for filename, constant in [('index.html', 'kIndexHtml'), ('app.js', 'kAppJs'),
                                ('style.css', 'kStyleCss'), ('video_player.js', 'kVideoPlayerJs')]:
         content = (ROOT / 'native/chromium/windows/resources' / filename).read_text(encoding='utf-8')

@@ -147,6 +147,25 @@ observer navigation/state persistence, final product codecs, PiP, Android
 background playback, external subtitles/tracks, download integration and full
 library parity still require implementation or product-runtime acceptance.
 
+The native update service now uses the profile's browser network context to query
+this repository's stable release without credentials/cookies. It validates
+numeric three/four-component versions, exact official asset paths and names,
+size limits and GitHub SHA-256 digests. Downloads are streamed to a private
+staging directory, then size/hash checked and renamed. Installation rechecks the
+file and requires a separate confirmation. The Android bridge checks this
+application's package name and uses a narrowly scoped cache FileProvider path
+plus the OS installer; the OS retains its permission/signature checks.
+
+The hub preserves legacy automatic-check and snooze choices, checks no more than
+every 12 hours when opened, supports a seven-day tag-specific snooze, and retains
+manual checks. It does not claim a background notification service when the hub
+is never opened. Windows compiler syntax checks and actual C++ validator tests
+passed. Eight renderer-flow checks passed with a stub native service, including
+literal release notes, confirmation cancellation and rejected hash results.
+Native network/download/hash/cancellation and installer execution, Android JNI
+build and OS behavior remain unverified; these are required product acceptance.
+No installer was downloaded/executed by the renderer-flow tests.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;

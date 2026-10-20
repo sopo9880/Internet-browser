@@ -22,6 +22,7 @@ source_set("ui") {
   deps = [
     ":transport",
     ":video_player",
+    ":updater",
     ":legacy_data",
     "//base",
     "//chrome/browser/profiles:profile",
@@ -42,4 +43,19 @@ source_set("video_player") {
   sources = [ "video_player.cc", "video_player.h", "video_metadata.h", "resources.h" ]
   public_deps = [ "//content/public/browser", "//base" ]
   deps = [ "//chrome/common", "//content/public/common", "//ui/base:types", "//url" ]
+}
+
+source_set("updater") {
+  sources = [ "updater.cc", "updater.h", "update_manifest.h", "update_validation.h", "resources.h" ]
+  public_deps = [ "//base" ]
+  deps = [
+    "//chrome/browser/profiles:profile",
+    "//content/public/browser",
+    "//crypto",
+    "//net",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
+    "//url",
+  ]
+  deps += [ "//chrome/browser/util:jni_headers" ]
 }

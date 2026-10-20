@@ -129,7 +129,9 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
         run([vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowser', '-j', str(jobs),
              'obj/chrome/browser/internet_browser/transport/transport.obj',
              'obj/chrome/browser/internet_browser/legacy_data/legacy_data.obj',
-             'obj/chrome/browser/internet_browser/ui/internet_browser_ui.obj'], cwd=source, env=env)
+             'obj/chrome/browser/internet_browser/ui/internet_browser_ui.obj',
+             'obj/chrome/browser/internet_browser/video_player/video_player.obj',
+             'obj/chrome/browser/internet_browser/updater/updater.obj'], cwd=source, env=env)
         run([vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowser', '-j', str(jobs),
              'chrome', 'mini_installer'], cwd=source, env=env)
         names = ['chrome.exe', 'chrome.7z', 'mini_installer.exe']

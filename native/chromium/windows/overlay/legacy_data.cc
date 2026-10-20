@@ -61,7 +61,8 @@ base::DictValue ReadLegacyData() {
   for (const char* name : {"dpi_enabled", "dpi_options_preset", "dpi_options_split",
        "dpi_options_split_value", "dpi_options_disorder", "dpi_options_disorder_value",
        "dpi_options_tls", "dpi_options_tls_value", "dpi_options_auto", "dpi_options_http",
-       "dpi_options_fake", "dpi_options_ttl", "update_auto_check"}) {
+       "dpi_options_fake", "dpi_options_ttl", "update_auto_check",
+       "update_last_auto_check", "update_snoozed_tag", "update_snoozed_until"}) {
     const auto* value = preferences.Find(std::string("flutter.") + name);
     if (!value)
       value = preferences.Find(name);
