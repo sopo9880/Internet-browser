@@ -1,12 +1,20 @@
 """Checks APK staging invariants without pretending a ZIP fixture is an APK."""
 from pathlib import Path
 import struct
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 import zipfile
 from tool.chromium.build_native_android import verify_payload
 
 class NativeAndroidPayloadTests(unittest.TestCase):
+    def test_cli_imports_from_outside_repository(self):
+        script=Path(__file__).resolve().parents[1]/'chromium/build_native_android.py'
+        with TemporaryDirectory() as tmp:
+            result=subprocess.run([sys.executable,str(script),'--help'],cwd=tmp,capture_output=True,text=True,check=True)
+            self.assertIn('--product-objects-only',result.stdout)
+
     def fixture(self, root, *, changed_transport=False, wrong_arch=False, missing_license=False):
         payload=b'controlled-transport-payload'
         (root/'transport').write_bytes(payload)

@@ -27,7 +27,8 @@ except ImportError:
     from prepare_android_product import product_path
     from titanium_pin import SOURCE_SHA, VANADIUM_SHA
     from titanium_product import PRODUCT_PACKAGE, verify_native_apk
-    from sign_candidate import parse_verified_certificate_sha256
+    sys.path.insert(0, str(ROOT))
+    from tool.chromium.sign_candidate import parse_verified_certificate_sha256
 
 PHASE_RECORDS = ('source-preparation.json', 'titanium-patches.json',
                  'titanium-dependencies.json', 'titanium-hooks.json', 'titanium-upstream.json')
@@ -141,6 +142,7 @@ def build(workspace: Path, stage: Path, version_code: int, jobs: int,
             raise ValueError('Integration checkout must be clean so provenance identifies the compiled source')
         env = os.environ.copy()
         env.update({'DEPOT_TOOLS_UPDATE': '0', 'DEPOT_TOOLS_METRICS': '0', 'DEPOT_TOOLS_BUILD_TELEMETRY': '0'})
+        env['JAVA_HOME'] = str(source / 'third_party/jdk/current')
         env['PATH'] = str(depot) + os.pathsep + str(source / 'third_party/jdk/current/bin') + os.pathsep + env.get('PATH', '')
         def run(*arguments):
             subprocess.run([str(a) for a in arguments], env=env, cwd=source, check=True)
