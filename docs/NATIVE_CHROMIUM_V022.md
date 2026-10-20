@@ -119,12 +119,14 @@ syntax checks and Android GN generation passed with these pages included;
 the runtime smoke check must still verify that the built page is served.
 Corresponding source distribution/reconstruction remains a separate release task.
 
-Windows artwork review also found remaining upstream images in
-`chrome/app/theme/chromium`, the scaled theme directories, Windows tiles and
-`components/resources`. Replacing the main executable icon alone does not finish
-product branding. These resources must be generated from the existing parcel
-artwork before the final rebuild, without changing third-party search/provider
-logos or attribution.
+The Windows overlay now generates 25 product resources from the existing parcel
+artwork: executable/app-list icons, square/scaled logos, monochrome variants,
+Windows tiles, SVG logos and light/dark product-name images. Generation preserves
+PNG dimensions and checks every pinned path before writing. A visual contact-sheet
+review and deterministic output/dimension checks passed against the real source
+checkout. These source changes require the next rebuild and runtime inspection;
+they have not modified the source cache used by the active full build. Search and
+provider artwork, distinct incognito/security icons and attribution remain intact.
 
 ## Required before release
 

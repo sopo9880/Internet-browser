@@ -19,6 +19,11 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCT = json.loads((ROOT / 'native/chromium/product.json').read_text())
 STAMP = '.internet-browser-overlay.json'
 
+try:
+    from .windows_artwork import ARTWORK_PATHS, artwork
+except ImportError:
+    from windows_artwork import ARTWORK_PATHS, artwork
+
 
 def replace_once(text: str, old: str, new: str) -> str:
     if text.count(old) != 1:
@@ -137,7 +142,7 @@ def overlay_path(checkout: Path, relative: str) -> Path:
     localized = re.fullmatch(r'chrome/app/resources/chromium_strings_[a-zA-Z0-9_-]+\.xtb', relative)
     owned = re.fullmatch(r'chrome/browser/internet_browser/[a-z_]+\.(?:cc|h|gn)', relative)
     # BUILD.gn includes uppercase letters, so handle that owned name explicitly.
-    if not (relative in allowed or localized or owned or
+    if not (relative in allowed or relative in ARTWORK_PATHS or localized or owned or
             relative == 'chrome/browser/internet_browser/BUILD.gn'):
         raise ValueError(f'Unexpected overlay path: {relative}')
     path = (checkout / relative).resolve()
@@ -342,17 +347,8 @@ def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
             changes['chrome/browser/internet_browser/' + path.name] = path.read_bytes()
     changes['chrome/browser/internet_browser/resources.h'] = resource_header()
 
-    # Generate the native Windows icon from this repository's existing asset.
-    from PIL import Image
-    import io
-    icon = Image.open(ROOT / 'assets/icon/parcel.png').convert('RGBA')
-    output = io.BytesIO()
-    icon.save(output, format='ICO', sizes=[(16, 16), (24, 24), (32, 32),
-                                         (48, 48), (64, 64), (128, 128), (256, 256)])
-    icon_path = 'chrome/app/theme/chromium/win/chromium.ico'
-    if not (checkout / icon_path).is_file():
-        raise ValueError('Pinned Chromium native Windows icon path changed')
-    changes[icon_path] = output.getvalue()
+    # Generate all native product images without touching provider artwork.
+    changes.update(artwork(checkout, ROOT))
     # Validate everything before changing any source file.
     for relative, data in changes.items():
         path = overlay_path(checkout, relative)
