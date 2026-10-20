@@ -93,6 +93,18 @@ Custom DPI controls, applying legacy settings, full media player/library parity,
 and updater integration remain required. Source wiring and Java checks do not
 establish an integrated or release-ready Android APK.
 
+The dedicated Linux cache has now completed source synchronization and hooks,
+291 Vanadium patches, and Titanium's pinned driver (88 changed root files).
+The source overlay applied 1,247 product files and remapped 1,273 translation
+fingerprints. Actual Android GN generation succeeded with 98,385 targets from
+4,981 build files. None of this is an Android browser compilation result.
+
+The ARM64 ByeDPI PIE compiled using Chromium LLVM and its NDK 30 sysroot subset.
+ELF inspection confirmed `/system/bin/linker64`, Android libc/libdl, 16 KiB load
+alignment, RELRO and a non-executable stack. Device execution remains unverified.
+The exact product overlay can be removed only after every owned file hash and
+source revision matches, allowing controlled incremental source updates.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;
@@ -105,6 +117,8 @@ a compiled browser is not functional acceptance. Remaining work includes:
   download/library/player and updater integration without deleting old profiles.
 - Finish English/localized branding and artwork on both platforms. Retain
   Chromium, Titanium and other upstream copyright/licence attribution.
+- Bundle the pinned upstream license/exception texts and corresponding source
+  reconstruction information with the final native distributions.
 - Android branding, permissions/security review, ByeDPI, media and migration.
 - Light PR checks, main-branch source build/sign once, then publish those exact
   APK/EXE artifacts with checksums and corresponding source information.
