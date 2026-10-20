@@ -226,6 +226,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
@@ -240,6 +241,33 @@ jobs:
         with:
           name: release-windows-installer
           path: dist
+      - name: Download signed Chromium APK from pinned v0.2.1 signing Action
+        if: env.VERSION == '0.2.1'
+        uses: actions/download-artifact@v4
+        with:
+          name: UNVERIFIED-official-key-native-candidate-v0.2.1-NOT-RELEASE
+          run-id: 39334182017
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: dist/pinned-native
+      - name: Verify signed Chromium provenance and replace only v0.2.1 Android asset
+        if: env.VERSION == '0.2.1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/39334182017" > "$RUNNER_TEMP/pinned-sign-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/12226545642" > "$RUNNER_TEMP/pinned-sign-artifact.json"
+          AAPT2="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name aapt2 | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$AAPT2" && test -x "$APKSIGNER"
+          python3 tool/release_pinned_native.py \
+            --run "$RUNNER_TEMP/pinned-sign-run.json" \
+            --artifact "$RUNNER_TEMP/pinned-sign-artifact.json" \
+            --artifact-dir dist/pinned-native \
+            --target dist/Internet-browser-Android-v0.2.1.apk \
+            --pubspec pubspec.yaml \
+            --aapt2 "$AAPT2" \
+            --apksigner "$APKSIGNER"
       - name: Verify exact asset names and generate checksums
         shell: bash
         run: |
@@ -259,6 +287,9 @@ jobs:
           RELEASE_NOTES="Windows installer and Android APK signed using the stored release key. Read docs/UPDATES.md before upgrading. SHA-256 checksums are attached."
           if [ "$VERSION" = "0.2.0" ]; then
             RELEASE_NOTES="$RELEASE_NOTES Android Chromium/AdBlock physical-device validation is deferred until AFTER publication. An APK build does not prove extension support. Follow docs/POST_RELEASE_ANDROID_VALIDATION.md."
+          fi
+          if [ "$VERSION" = "0.2.1" ]; then
+            RELEASE_NOTES="$(cat docs/releases/v0.2.1.md)"
           fi
           gh release create "$TAG" \
             "$APK" "$EXE" "dist/SHA256SUMS.txt" \
