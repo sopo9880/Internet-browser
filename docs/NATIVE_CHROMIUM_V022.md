@@ -166,6 +166,18 @@ Native network/download/hash/cancellation and installer execution, Android JNI
 build and OS behavior remain unverified; these are required product acceptance.
 No installer was downloaded/executed by the renderer-flow tests.
 
+`build_native_android.py` now connects the prepared source to compilation.
+It validates the source/driver/nested repository pins, reviewed patch bytes,
+owned overlay hashes and unknown tracked edits before replacing only the recorded
+product overlay. It rebuilds the pinned transport, regenerates GN, compiles the
+five product translation units first, then builds `chrome_public_apk`. Final APK
+checks cover package/version, the exact transport/license payload, ARM64 engine
+ELF and disposable signature. Provenance and source-phase records accompany the
+staged APK; they explicitly retain false runtime/release/production-signing flags.
+The builder never accesses production signing keys. A prepare-only phase and a
+product-objects-only phase support validation without creating a misleading APK.
+This path still needs actual source-builder execution and formal CI/signing wiring.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;
