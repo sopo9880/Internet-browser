@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+import shlex
 import subprocess
 
 UPSTREAM_PACKAGE = "io.github.jqssun.helium"
@@ -41,6 +42,7 @@ def prepare_source(
     ninja_jobs: int | None = None,
     sync_jobs: int | None = None,
     preprovisioned_deps: bool = False,
+    product_overlay: bool = False,
 ) -> tuple[str, str]:
     if package not in ALLOWED_PACKAGES:
         raise ValueError("Only explicit research/product Android package IDs are allowed")
@@ -117,6 +119,13 @@ def prepare_source(
             "python3 build/install-build-deps.py --quick-check --android --no-arm --no-chromeos-fonts")
         if re.search(r"(?m)^\s*sudo\s", build):
             raise ValueError("Unexpected privileged command in pinned build template")
+    if product_overlay:
+        if package != PRODUCT_PACKAGE:
+            raise ValueError('Product overlay requires the explicit product package')
+        script = Path(__file__).resolve().with_name('prepare_android_product.py')
+        build = replace_exact(build, 'source $SCRIPT_DIR/patch.sh\n',
+            'source $SCRIPT_DIR/patch.sh\n'
+            f'python3 {shlex.quote(str(script))} --checkout "$PWD"\n')
     return args, build
 
 
@@ -177,6 +186,7 @@ def main() -> None:
     config.add_argument("--ninja-jobs", type=int)
     config.add_argument("--sync-jobs", type=int)
     config.add_argument("--preprovisioned-deps", action="store_true")
+    config.add_argument("--product-overlay", action="store_true")
     verify = sub.add_parser("verify")
     verify.add_argument("--apk", type=Path, required=True)
     verify.add_argument("--aapt2", type=Path, required=True)
@@ -192,6 +202,7 @@ def main() -> None:
             version_code=options.version_code, version_name=options.version_name,
             ninja_jobs=options.ninja_jobs, sync_jobs=options.sync_jobs,
             preprovisioned_deps=options.preprovisioned_deps,
+            product_overlay=options.product_overlay,
         )
         options.args.write_text(patched_args, encoding="utf-8")
         options.build.write_text(patched_build, encoding="utf-8")
