@@ -25,6 +25,16 @@
     <p id="transport-status" role="status">연결 상태 확인 중…</p><p id="save-status" role="status"></p>
     <p class="muted">변경한 설정은 브라우저를 완전히 종료한 뒤 다시 열면 적용됩니다. 사이트별 효과는 네트워크에 따라 다릅니다.</p>
   </section>
+  <section id="legacy-section" hidden>
+    <p class="eyebrow">YOUR DATA</p><h2>이전 브라우저의 데이터</h2>
+    <p>기존 데이터는 보관한 채 새 브라우저에서도 사용할 수 있습니다.</p>
+    <button id="import-bookmarks">북마크 가져오기</button><p id="import-status" role="status"></p>
+    <details><summary>이전 방문 기록</summary><ul id="legacy-history"></ul></details>
+  </section>
+  <section>
+    <p class="eyebrow">LIBRARY</p><h2>저장한 영상</h2>
+    <p id="video-status" role="status">영상 목록을 불러오는 중…</p><ul id="videos"></ul>
+  </section>
   <footer>Internet Browser 0.2.2 · Chromium 기반 <a href="chrome://version/">버전 정보</a> <a href="chrome://credits/">오픈소스 라이선스</a></footer>
 </main><script type="module" src="app.js"></script>
 </body></html>

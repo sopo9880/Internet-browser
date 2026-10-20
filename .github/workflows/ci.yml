@@ -10,6 +10,9 @@ on:
         default: false
 permissions:
   contents: read
+concurrency:
+  group: browser-ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -37,7 +40,9 @@ jobs:
       - run: flutter analyze
       - run: flutter test
   android:
-    if: github.event_name != 'workflow_dispatch' || !inputs.native_windows
+    # The previous Flutter Android product is kept as an explicit legacy
+    # regression build; PRs run light checks during native migration.
+    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows
     runs-on: ubuntu-24.04
     needs: quality
     env:
@@ -66,7 +71,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
-    if: github.event_name != 'workflow_dispatch' || !inputs.native_windows
+    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows
     # Flutter 3.35.x cannot identify Visual Studio 2026 on windows-latest.
     runs-on: windows-2022
     needs: quality

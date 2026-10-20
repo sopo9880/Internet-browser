@@ -10,8 +10,17 @@ source_set("ui") {
   public_deps = [ "//content/public/browser" ]
   deps = [
     ":transport",
+    ":legacy_data",
     "//base",
     "//chrome/browser/profiles:profile",
+    "//chrome/browser/bookmarks",
+    "//components/bookmarks/browser",
     "//content/public/common",
   ]
+}
+
+source_set("legacy_data") {
+  sources = [ "legacy_data.cc", "legacy_data.h" ]
+  public_deps = [ "//base" ]
+  deps = [ "//chrome/common", "//net", "//url" ]
 }
