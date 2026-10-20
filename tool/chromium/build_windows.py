@@ -109,8 +109,15 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
         output = source / 'out/InternetBrowser'
         output.mkdir(exist_ok=True, parents=True)
         shutil.copyfile(ROOT / 'native/chromium/windows/args.gn', output / 'args.gn')
-        run([depot / 'gn.bat', 'gen', 'out/InternetBrowser'], cwd=source, env=env)
-        run([depot / 'autoninja.bat', '-C', 'out/InternetBrowser', '-j', str(jobs),
+        # gclient bootstraps vpython. Invoke the pinned Python entry points
+        # through it so GN and its scripts share a complete Python runtime.
+        # The legacy .bat shims require a second, independently bootstrapped
+        # python-bin runtime and can fail even after a successful sync.
+        vpython = depot / '.cipd_bin/vpython3.exe'
+        if not vpython.is_file():
+            raise RuntimeError('gclient did not bootstrap its pinned vpython runtime')
+        run([vpython, depot / 'gn.py', 'gen', 'out/InternetBrowser'], cwd=source, env=env)
+        run([vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowser', '-j', str(jobs),
              'chrome', 'mini_installer'], cwd=source, env=env)
         names = ['chrome.exe', 'chrome.7z', 'mini_installer.exe']
         for name in names:

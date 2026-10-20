@@ -213,6 +213,8 @@ InternetBrowserUI::InternetBrowserUI(content::WebUI* web_ui)
           data = internet_browser::kAppJs;
         else if (path == "style.css")
           data = internet_browser::kStyleCss;
+        else if (path == "logo.svg")
+          data = internet_browser::kLogoSvg;
         std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(std::move(data)));
       }));
   web_ui->AddMessageHandler(std::make_unique<InternetBrowserHandler>());

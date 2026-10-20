@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,22 +64,55 @@ def brand_install_modes(text: str) -> str:
 def brand_messages(text: str, *, xtb: bool = False) -> str:
     """Keep message IDs, placeholders and copyright intact.
 
-    Changing a translatable GRD message would invalidate its XTB fingerprint.
-    Only nontranslatable product names are changed in GRD at this stage.
-    Translated messages retain their IDs and have their rendered brand text
-    replaced in XTB. Broader English rebranding needs a GRIT ID remap.
+    Changing GRD messages changes their GRIT fingerprints. The caller must
+    remap XTB IDs with the exact pinned GRIT implementation below. Latin-only
+    boundaries also match Korean suffixes such as Chromium의 and Chromium에서.
     """
     tag = 'translation' if xtb else 'message'
     pattern = rf'(<{tag}\b[^>]*>)(.*?)(</{tag}>)'
     def transform(match: re.Match) -> str:
         body = match[2]
-        if (xtb or 'translateable="false"' in match[1]) and (
-                'Copyright' not in body and 'Chromium Authors' not in body):
-            body = re.sub(r'\bChromium\b', 'Internet Browser', body)
+        if 'Copyright' not in body and 'Chromium Authors' not in body:
+            body = re.sub(r'(?<![A-Za-z])Chromium(?![A-Za-z])', 'Internet Browser', body)
         return match[1] + body + match[3]
     result = re.sub(pattern, transform, text, flags=re.S)
     ET.fromstring(result)
     return result
+
+
+def translation_id_map(checkout: Path, before: str, after: str) -> dict[str, str]:
+    """Use upstream GRIT itself; never guess translation fingerprints."""
+    import io
+    sys.path.insert(0, str(checkout / 'tools/grit'))
+    try:
+        from grit import grd_reader
+        from grit.node.message import MessageNode
+        def messages(text):
+            node = grd_reader.Parse(io.StringIO(text),
+                dir=str(checkout / 'chrome/app'), tags_to_ignore={'translations'},
+                skip_validation_checks=True)
+            return node.GetChildrenOfType(MessageNode)
+        original, branded = messages(before), messages(after)
+        if len(original) != len(branded):
+            raise ValueError('Branding unexpectedly changed GRD message structure')
+        result = {}
+        for old, new in zip(original, branded):
+            if old.attrs['name'] != new.attrs['name']:
+                raise ValueError('Branding unexpectedly changed message order')
+            old_id = str(old.GetCliques()[0].GetId())
+            new_id = str(new.GetCliques()[0].GetId())
+            if old_id != new_id:
+                if old_id in result and result[old_id] != new_id:
+                    raise ValueError('Ambiguous translation ID remapping')
+                result[old_id] = new_id
+        return result
+    finally:
+        sys.path.pop(0)
+
+
+def remap_translation_ids(text: str, mapping: dict[str, str]) -> str:
+    return re.sub(r'(<translation\b[^>]*\bid=")([^"]+)(")',
+        lambda match: match[1] + mapping.get(match[2], match[2]) + match[3], text)
 
 
 def digest(path: Path) -> str:
@@ -182,10 +216,13 @@ def prepare(checkout: Path) -> dict:
 
     update('chrome/app/theme/chromium/BRANDING', brand_metadata)
     update('chrome/install_static/chromium_install_modes.h', brand_install_modes)
-    update('chrome/app/chromium_strings.grd', brand_messages)
+    grd_before = (checkout / 'chrome/app/chromium_strings.grd').read_text(encoding='utf-8')
+    grd_after = brand_messages(grd_before)
+    mapping = translation_id_map(checkout, grd_before, grd_after)
+    changes['chrome/app/chromium_strings.grd'] = grd_after.encode()
     for path in sorted((checkout / 'chrome/app/resources').glob('chromium_strings_*.xtb')):
         update(path.relative_to(checkout).as_posix(),
-               lambda text: brand_messages(text, xtb=True))
+               lambda text: remap_translation_ids(brand_messages(text, xtb=True), mapping))
 
     include = '#include "chrome/browser/internet_browser/transport.h"\n'
     def integrate_main(text: str) -> str:
@@ -237,6 +274,10 @@ def prepare(checkout: Path) -> dict:
         if ')IBRESOURCE"' in content:
             raise ValueError('Unexpected raw-string delimiter in native resources')
         resources.append(f'inline constexpr char {constant}[] = R"IBRESOURCE({content})IBRESOURCE";')
+    logo = (ROOT / 'assets/icon/parcel.svg').read_text(encoding='utf-8')
+    if ')IBRESOURCE"' in logo:
+        raise ValueError('Unexpected raw-string delimiter in product logo')
+    resources.append(f'inline constexpr char kLogoSvg[] = R"IBRESOURCE({logo})IBRESOURCE";')
     resources.extend(['}', '#endif', ''])
     changes['chrome/browser/internet_browser/resources.h'] = '\n'.join(resources).encode()
 
@@ -258,6 +299,7 @@ def prepare(checkout: Path) -> dict:
         path.write_bytes(data)
     result = {'product': PRODUCT, 'files': {
         path: hashlib.sha256(data).hexdigest() for path, data in changes.items()},
+        'translation_ids_remapped': len(mapping),
         'native_build_verified': False, 'runtime_verified': False}
     stamp.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     return result

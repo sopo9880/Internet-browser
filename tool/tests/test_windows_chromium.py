@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from tool.chromium.prepare_windows import (
     PRODUCT, brand_install_modes, brand_messages, brand_metadata, replace_once,
     overlay_path,
+    remap_translation_ids,
 )
 
 
@@ -24,19 +25,30 @@ class NativeWindowsIdentityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 replace_once(original, 'anchor', 'replacement')
 
-    def test_grd_fingerprints_and_placeholders_stay_valid(self):
+    def test_english_branding_keeps_placeholders_valid(self):
         original = ('<grit><message name="IDS_PRODUCT_NAME" translateable="false">'
                     'Chromium</message><message name="IDS_NOTE">'
                     'Open Chromium <ph name="N">$1</ph></message></grit>')
         result = brand_messages(original)
         self.assertIn('>Internet Browser</message>', result)
-        self.assertIn('Open Chromium <ph name="N">$1</ph>', result)
+        self.assertIn('Open Internet Browser <ph name="N">$1</ph>', result)
 
     def test_xtb_keeps_translation_ids_and_substitutions(self):
         original = ('<translationbundle><translation id="123">Chromium 설정 '
                     '<ph name="NAME"/></translation></translationbundle>')
         result = brand_messages(original, xtb=True)
         self.assertIn('id="123">Internet Browser 설정 <ph name="NAME"/>', result)
+
+    def test_korean_suffixes_do_not_hide_old_branding(self):
+        original = '<translationbundle><translation id="123">Chromium의 Chromium에서</translation></translationbundle>'
+        result = brand_messages(original, xtb=True)
+        self.assertIn('Internet Browser의 Internet Browser에서', result)
+
+    def test_translation_fingerprints_are_remapped_without_touching_other_ids(self):
+        original = '<translationbundle><translation id="123">Chromium</translation><translation id="456">Other</translation></translationbundle>'
+        result = remap_translation_ids(original, {'123': '789'})
+        self.assertIn('id="789">Chromium', result)
+        self.assertIn('id="456">Other', result)
 
     def test_malformed_resources_are_rejected(self):
         with self.assertRaises(Exception):
