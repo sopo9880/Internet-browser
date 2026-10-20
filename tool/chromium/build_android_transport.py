@@ -47,7 +47,9 @@ def build(checkout: Path, workspace: Path) -> Path:
     compiler_command = str(compiler) + ' --target=aarch64-linux-android24 --sysroot=' + str(sysroot)
     subprocess.run(['make', '-j', '1', 'all', 'CC=' + compiler_command,
         'CFLAGS=-I. -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2',
-        'LDFLAGS=-pie -Wl,-z,relro,-z,now,-z,max-page-size=16384'], cwd=source, check=True)
+        # This executable is C-only. Chromium's NDK subset intentionally
+        # omits the standalone toolchain's default libunwind archive.
+        'LDFLAGS=-pie --unwindlib=none -Wl,-z,relro,-z,now,-z,max-page-size=16384'], cwd=source, check=True)
     binary = (source / 'ciadpi').read_bytes()
     if binary[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<HH', binary, 16) != (3, 183):
         raise ValueError('ByeDPI output is not an ARM64 Android PIE')
