@@ -173,7 +173,7 @@ void StartTransport() {
   state.job.Set(CreateJobObject(nullptr, nullptr));
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
   limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  if (!state.job.IsValid() ||
+  if (!state.job.is_valid() ||
       !SetInformationJobObject(state.job.get(), JobObjectExtendedLimitInformation,
                                &limits, sizeof(limits))) {
     state.status = "ByeDPI 프로세스 관리 초기화 실패";

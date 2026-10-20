@@ -120,6 +120,13 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
         if not vpython.is_file():
             raise RuntimeError('gclient did not bootstrap its pinned vpython runtime')
         run([vpython, depot / 'gn.py', 'gen', 'out/InternetBrowser'], cwd=source, env=env)
+        # Compile the product's own translation units first. This schedules
+        # their generated-header dependencies and catches API drift before
+        # spending hours on unrelated Chromium C++ targets.
+        run([vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowser', '-j', str(jobs),
+             'obj/chrome/browser/internet_browser/transport/transport.obj',
+             'obj/chrome/browser/internet_browser/legacy_data/legacy_data.obj',
+             'obj/chrome/browser/internet_browser/ui/internet_browser_ui.obj'], cwd=source, env=env)
         run([vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowser', '-j', str(jobs),
              'chrome', 'mini_installer'], cwd=source, env=env)
         names = ['chrome.exe', 'chrome.7z', 'mini_installer.exe']

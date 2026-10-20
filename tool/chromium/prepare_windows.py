@@ -242,7 +242,25 @@ def prepare(checkout: Path) -> dict:
     def integrate_main(text: str) -> str:
         text = replace_once(text,
             '#include "chrome/browser/chrome_browser_main_win.h"\n',
-            '#include "chrome/browser/chrome_browser_main_win.h"\n' + include)
+            '#include "chrome/browser/chrome_browser_main_win.h"\n' + include +
+            '#include "chrome/browser/prefs/session_startup_pref.h"\n')
+        text = replace_once(text,
+            '  ChromeBrowserMainParts::PostProfileInit(profile, is_initial_profile);\n',
+            '  ChromeBrowserMainParts::PostProfileInit(profile, is_initial_profile);\n'
+            '  if (is_initial_profile) {\n'
+            '    auto* settings = profile->GetPrefs();\n'
+            '    if (SessionStartupPref::TypeIsDefault(settings)) {\n'
+            '      SessionStartupPref startup(SessionStartupPref::URLS);\n'
+            '      startup.urls.emplace_back("chrome://internet-browser/");\n'
+            '      SessionStartupPref::SetStartupPref(profile, startup);\n'
+            '    }\n'
+            '    if (settings->FindPreference(prefs::kHomePage)->IsDefaultValue()) {\n'
+            '      settings->SetString(prefs::kHomePage, "chrome://internet-browser/");\n'
+            '      settings->SetBoolean(prefs::kHomePageIsNewTabPage, false);\n'
+            '    }\n'
+            '    if (settings->FindPreference(prefs::kShowHomeButton)->IsDefaultValue())\n'
+            '      settings->SetBoolean(prefs::kShowHomeButton, true);\n'
+            '  }\n')
         text = replace_once(text,
             'void ChromeBrowserMainPartsWin::PostMainMessageLoopRun() {\n',
             'void ChromeBrowserMainPartsWin::PostMainMessageLoopRun() {\n'
