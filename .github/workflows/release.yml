@@ -260,7 +260,7 @@ jobs:
           AAPT2="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name aapt2 | sort -V | tail -n 1)"
           APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$AAPT2" && test -x "$APKSIGNER"
-          python3 tool/release_pinned_native.py \
+          python3 -m tool.release_pinned_native \
             --run "$RUNNER_TEMP/pinned-sign-run.json" \
             --artifact "$RUNNER_TEMP/pinned-sign-artifact.json" \
             --artifact-dir dist/pinned-native \
