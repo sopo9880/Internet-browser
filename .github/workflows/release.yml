@@ -37,6 +37,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "$RELEASE_TAG" != v0.2.1 ]; then
+            echo 'This legacy Flutter release path is restricted to v0.2.1. Native releases use the new source build/signing path.'
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "This version is already published; leaving it unchanged."
             echo 'publish=false' >> "$GITHUB_OUTPUT"

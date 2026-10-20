@@ -8,6 +8,10 @@ on:
         description: Build the v0.2.2 native Chromium Windows development candidate
         type: boolean
         default: false
+      native_android:
+        description: Compile Android product objects (no APK or release)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -18,6 +22,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Select one native builder per dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          NATIVE_WINDOWS: ${{ inputs.native_windows }}
+          NATIVE_ANDROID: ${{ inputs.native_android }}
+        run: |
+          if [ "$NATIVE_WINDOWS" = true ] && [ "$NATIVE_ANDROID" = true ]; then
+            echo 'Select only one native platform for this dispatch.'
+            exit 1
+          fi
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.7'
@@ -54,7 +68,7 @@ jobs:
   android:
     # The previous Flutter Android product is kept as an explicit legacy
     # regression build; PRs run light checks during native migration.
-    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows
+    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows && !inputs.native_android
     runs-on: ubuntu-24.04
     needs: quality
     env:
@@ -83,7 +97,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
-    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows
+    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows && !inputs.native_android
     # Flutter 3.35.x cannot identify Visual Studio 2026 on windows-latest.
     runs-on: windows-2022
     needs: quality
@@ -150,7 +164,7 @@ jobs:
           echo "AdBlock installation and in-app engine remain UNVERIFIED."
 
   native_windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.native_windows
+    if: github.event_name == 'workflow_dispatch' && inputs.native_windows && !inputs.native_android
     needs: quality
     runs-on: [self-hosted, Windows, X64, chromium-windows-v022]
     concurrency:
@@ -182,3 +196,11 @@ jobs:
           path: build/native-windows/*
           if-no-files-found: error
           retention-days: 14
+
+  native_android:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_android && !inputs.native_windows
+    needs: quality
+    uses: ./.github/workflows/native-android.yml
+    with:
+      phase: product-objects
+      jobs: '2'

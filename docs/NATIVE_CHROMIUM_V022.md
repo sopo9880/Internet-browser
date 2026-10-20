@@ -176,7 +176,13 @@ ELF and disposable signature. Provenance and source-phase records accompany the
 staged APK; they explicitly retain false runtime/release/production-signing flags.
 The builder never accesses production signing keys. A prepare-only phase and a
 product-objects-only phase support validation without creating a misleading APK.
-This path still needs actual source-builder execution and formal CI/signing wiring.
+Its prepare-only execution now passed on the real Linux cache, including source
+validation, transport rebuilding, product overlay and GN generation. No APK was
+created. `native-android.yml` schedules source-object checks on `chromium-wsl2`,
+sharing the Windows compile queue. Its APK phase requires main and matching
+product/release versions. Production signing/publication wiring remains required.
+The old Flutter release path now permits only v0.2.1, so a v0.2.2 version change
+cannot accidentally publish the previous implementation.
 
 ## Required before release
 
