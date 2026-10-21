@@ -23,6 +23,7 @@
 #include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/process/kill.h"
 #include "base/process/process.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
@@ -32,6 +33,16 @@
 
 namespace internet_browser {
 namespace {
+bool ProcessIsRunning(base::Process& process) {
+  if (!process.IsValid()) return false;
+  int exit_code = 0;
+  if (base::GetTerminationStatus(process.Handle(), &exit_code) ==
+      base::TERMINATION_STATUS_STILL_RUNNING) return true;
+  // GetTerminationStatus reaps an exited POSIX child. Do not retain a PID
+  // that could later be reused when StopTransport checks this handle.
+  process.Close();
+  return false;
+}
 struct State {
   base::Lock lock;
   base::Process process;
@@ -173,7 +184,7 @@ void StartTransport() {
   options.pre_exec_delegate = &lifetime;
   state.process = base::LaunchProcess(engine, options);
   for (int attempt = 0; state.process.IsValid() && attempt < 20; ++attempt) {
-    if (!state.process.IsRunning())
+    if (!ProcessIsRunning(state.process))
       break;
     if (CheckSocks(port)) {
       state.active = true;
@@ -198,7 +209,7 @@ void StopTransport() {
 base::DictValue GetStatus() {
   auto& state = GetState();
   base::AutoLock lock(state.lock);
-  if (state.active && !state.process.IsRunning()) {
+  if (state.active && !ProcessIsRunning(state.process)) {
     state.active = false;
     state.process.Close();
     state.status = "ByeDPI 엔진이 종료되었습니다. 브라우저를 다시 시작하세요.";
