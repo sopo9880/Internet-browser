@@ -164,8 +164,12 @@ manual checks. It does not claim a background notification service when the hub
 is never opened. Windows compiler syntax checks and actual C++ validator tests
 passed. Eight renderer-flow checks passed with a stub native service, including
 literal release notes, confirmation cancellation and rejected hash results.
-Native network/download/hash/cancellation and installer execution, Android JNI
-build and OS behavior remain unverified; these are required product acceptance.
+Installed Windows native checks subsequently queried the actual stable GitHub
+release successfully, preserved legacy automatic-check false, and also ran the
+automatic hub check with legacy automatic-check true in a separate owned profile.
+Native installer download/hash/cancellation and updater-launched execution,
+Android JNI build and OS behavior remain unverified; these require product
+acceptance. This check did not download or execute an update installer.
 No installer was downloaded/executed by the renderer-flow tests.
 
 `build_native_android.py` now connects the prepared source to compilation.
@@ -369,5 +373,7 @@ a compiled browser is not functional acceptance. Remaining work includes:
 - Light PR checks, main-branch source build/sign once, then publish those exact
   APK/EXE artifacts with checksums and corresponding source information.
 
-The production version and release workflow have not yet been advanced to
-v0.2.2. They must not publish a partial migration as a completed release.
+The product and release metadata now both name v0.2.2 (Android code 2002001),
+preparing the main-only formal build. No v0.2.2 tag or public release has been
+created. Matching versions do not qualify the remaining work or authorize the
+staging tool to publish; it retains false release-approval/publication flags.
