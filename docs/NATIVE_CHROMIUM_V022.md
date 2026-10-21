@@ -419,6 +419,11 @@ processing, malformed-input rejection and active-job shutdown/partial cleanup. T
 is controlled-page evidence, **not live YouTube/Instagram compatibility evidence**.
 The JavaScript discovery suite has 9 checks; release staging additionally requires
 the full native video smoke and its exact engine DLL hash.
+Stream parts use short per-attempt names inside each unique job directory, and
+the completion marker is flushed to a short CREATE-only staging file before
+being renamed. This avoids redundant temporary GUIDs exceeding Windows path
+limits in the nested runner checkout. Storage/access errors are distinguished
+from network interruption; incomplete output is never registered in the library.
 The updated Windows source browser also passed all 22 existing native smoke
 checks, retaining bookmark import, extension fixture behavior, subtitles,
 playback/resume and unchanged legacy data. The 117 Python tests passed with 3

@@ -53,6 +53,7 @@ class VideoStream : public download::DownloadItem::Observer, public content::Web
   base::FilePath directory_;
   std::vector<GURL> parts_;
   size_t completed_ = 0;
+  size_t part_attempt_ = 0;
   size_t audio_start_ = 0;
   size_t transmux_generation_ = 0;
   double received_ = 0;

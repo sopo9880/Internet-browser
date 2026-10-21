@@ -4,7 +4,6 @@
 #include <utility>
 #include "base/files/file.h"
 #include "base/files/file_util.h"
-#include "base/files/important_file_writer.h"
 #include "base/base64.h"
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
@@ -128,7 +127,16 @@ bool Finalize(base::FilePath directory, std::string title, std::string page, boo
   base::DictValue entry; entry.Set("title", title); entry.Set("sourcePage", page);
   entry.Set("separateAudio", audio);
   std::string json;
-  return base::JSONWriter::Write(entry, &json) && base::ImportantFileWriter::WriteFileAtomically(directory.AppendASCII("complete.json"), json);
+  if (!base::JSONWriter::Write(entry, &json)) return false;
+  // This directory is unique to the job and all writes are sequenced. A fixed
+  // CREATE-only staging name avoids adding another GUID to long profile paths.
+  // Publish the marker only after both media files and metadata are flushed.
+  const auto staging = directory.AppendASCII("complete.part");
+  {
+    base::File marker(staging, base::File::FLAG_CREATE | base::File::FLAG_WRITE);
+    if (!marker.IsValid() || !marker.WriteAtCurrentPosAndCheck(base::as_byte_span(json)) || !marker.Flush()) return false;
+  }
+  return base::Move(staging, directory.AppendASCII("complete.json"));
 }
 void ForgetDownload(Profile* profile, download::DownloadItem* item, bool cancel) {
   // Remove()/Cancel() notify observers themselves. Never call them from an
@@ -247,7 +255,17 @@ void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
   } else if (item->GetState() == download::DownloadItem::CANCELLED) Fail("영상 저장이 취소되었습니다.");
   else if (item->GetState() == download::DownloadItem::INTERRUPTED) {
     if (inspect_) { Fail("스트림 정보를 내려받지 못했습니다. 원본 페이지에서 영상을 재생한 뒤 다시 시도해 주세요."); return; }
-    error_ = "네트워크 오류로 중단되었습니다. 재개를 눌러 다시 시도하세요."; paused_ = true;
+    switch (item->GetLastReason()) {
+      case download::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
+        Fail("영상 저장 경로가 너무 깁니다. 더 짧은 경로의 브라우저 프로필에서 다시 시도해 주세요."); return;
+      case download::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
+        error_ = "저장 공간이 부족합니다. 공간을 확보한 뒤 재개해 주세요."; break;
+      case download::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
+        error_ = "영상 저장 폴더에 접근할 수 없습니다. 폴더 권한을 확인한 뒤 재개해 주세요."; break;
+      default:
+        error_ = "영상 구간 다운로드가 중단되었습니다. 연결 상태와 저장 폴더를 확인한 뒤 재개해 주세요.";
+    }
+    paused_ = true;
   }
 }
 void VideoStream::OnDownloadDestroyed(download::DownloadItem* item) {
@@ -389,7 +407,10 @@ void VideoStream::Appended(bool success) {
 void VideoStream::NextPart() {
   if (state_ != 0 || paused_ || waiting_ || observation_.IsObserving()) return;
   if (completed_ >= parts_.size()) { Fail("영상 구간 정보가 없습니다."); return; }
-  Fetch(parts_[completed_], directory_.AppendASCII("part-" + base::UnguessableToken::Create().ToString() + ".mp4"));
+  // The job directory already provides unguessable isolation. Short, distinct
+  // attempt names leave room for Chromium's .crdownload suffix on Windows and
+  // prevent a retry from colliding with a prior download's pending cleanup.
+  Fetch(parts_[completed_], directory_.AppendASCII("p" + std::to_string(++part_attempt_) + ".mp4"));
 }
 void VideoStream::Finalized(bool success) {
   waiting_ = false;

@@ -326,6 +326,8 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
         except Exception as error:
             report['error'] = repr(error); report['all_checks_passed'] = False
             if cdp:
+                try: report['transfers_at_failure'] = api('transfers')
+                except Exception: pass
                 try: report['final_page'] = cdp.evaluate(hub, '({url:location.href,visibility:document.visibilityState,text:document.body?.innerText?.slice(-1600),media:[...document.querySelectorAll("video,audio")].map(v=>({tag:v.tagName,src:v.currentSrc||v.src,readyState:v.readyState,networkState:v.networkState,preload:v.preload,paused:v.paused,time:v.currentTime,error:v.error?{code:v.error.code,message:v.error.message}:null}))})')
                 except Exception: pass
         finally:
