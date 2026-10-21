@@ -58,18 +58,24 @@ def brand_install_modes(text: str) -> str:
         '.base_app_id = L"Chromium"':
             '.base_app_id = L"InternetBrowser"',
         '.browser_prog_id_prefix = L"ChromiumHTM"':
-            '.browser_prog_id_prefix = L"InternetBrowserHTM"',
+            '.browser_prog_id_prefix = L"IBrowserHTM"',
         'L"Chromium HTML Document"': 'L"Internet Browser HTML Document"',
         '.direct_launch_url_scheme = "chromium"':
             '.direct_launch_url_scheme = "internet-browser"',
         '.pdf_prog_id_prefix = L"ChromiumPDF"':
-            '.pdf_prog_id_prefix = L"InternetBrowserPDF"',
+            '.pdf_prog_id_prefix = L"IBrowserPDF"',
         'L"Chromium PDF Document"': 'L"Internet Browser PDF Document"',
         'L"{7D2B3E1D-D096-4594-9D8F-A6667F12E0AC}"':
             'L"{57452552-D43D-4DAD-AD1B-6F4E32063543}"',
     }
     for old, new in replacements.items():
         text = replace_once(text, old, new)
+    # ShellUtil appends '.' plus the user's 26-character Base32 MD5 suffix.
+    # Windows limits the complete ProgID to 39 characters; exceeding it hits
+    # Chromium's NOTREACHED while the real installer creates shell shortcuts.
+    prefixes = re.findall(r'\.(?:browser|pdf)_prog_id_prefix = L"([^"]+)"', text)
+    if len(prefixes) != 2 or any(len(prefix) + 27 > 39 for prefix in prefixes):
+        raise ValueError('Windows per-user shell ProgIDs must fit the 39-character limit')
     return text
 
 
