@@ -14,6 +14,16 @@ applies the version-controlled overlay, and builds Chromium's real `chrome` and
 `mini_installer` targets. No prebuilt browser is renamed or wrapped in WebView2.
 The engine version is retained separately from the product's 0.x release version.
 
+The Windows shell uses the internal `IBrowserHTM`/`IBrowserPDF` ProgID prefixes.
+With Chromium's dot and 26-character user hash, each complete identifier is 38
+characters, within the Windows 39-character limit. The earlier
+`InternetBrowserHTM`/`InternetBrowserPDF` values reached 45 characters and caused
+the actual installer to hit `NOTREACHED` during shortcut registration, after
+copying the application payload. Payload hashes alone therefore do not prove a
+successful installation. Product name, install path, AppID and user-data paths
+are preserved by this correction; actual installer completion still needs
+verification with the corrected build.
+
 The overlay adds `chrome://internet-browser/` and a browser-owned ByeDPI process.
 Only allowlisted presets are accepted. Configuration is saved atomically in
 the dedicated product user-data directory and applies at browser restart.

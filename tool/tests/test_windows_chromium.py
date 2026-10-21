@@ -1,5 +1,6 @@
 """Identity/source safeguards for the native Windows Chromium migration."""
 import unittest
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -12,6 +13,29 @@ from tool.chromium.prepare_windows import (
 
 
 class NativeWindowsIdentityTests(unittest.TestCase):
+    def test_per_user_shell_progids_fit_windows_39_character_limit(self):
+        upstream = '\n'.join((
+            'kProductPathName[] = L"Chromium"',
+            '.base_app_name = L"Chromium"',
+            '.base_app_id = L"Chromium"',
+            '.browser_prog_id_prefix = L"ChromiumHTM"',
+            'L"Chromium HTML Document"',
+            '.direct_launch_url_scheme = "chromium"',
+            '.pdf_prog_id_prefix = L"ChromiumPDF"',
+            'L"Chromium PDF Document"',
+            'L"{7D2B3E1D-D096-4594-9D8F-A6667F12E0AC}"',
+        ))
+        branded = brand_install_modes(upstream)
+        prefixes = re.findall(r'\.(?:browser|pdf)_prog_id_prefix = L"([^"]+)"', branded)
+        self.assertEqual(len(prefixes), 2)
+        # Chromium appends a dot and the 26-character Base32 MD5 user suffix.
+        for prefix in prefixes:
+            with self.subTest(prefix=prefix):
+                self.assertLessEqual(len(prefix + '.' + 'A' * 26), 39)
+                self.assertNotIn(prefix, ('ChromeHTML', 'ChromePDF', 'ChromiumHTM', 'ChromiumPDF'))
+        self.assertIn('kProductPathName[] = L"Internet Browser"', branded)
+        self.assertIn('.base_app_id = L"InternetBrowser"', branded)
+
     def test_overlay_source_bytes_match_in_cached_crlf_and_fresh_lf_checkouts(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / 'source.cc'
