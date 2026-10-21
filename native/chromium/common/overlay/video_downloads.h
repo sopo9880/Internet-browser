@@ -8,6 +8,7 @@ namespace content { class BrowserContext; }
 namespace internet_browser {
 struct CompletedVideoDownload {
   base::FilePath path;
+  base::FilePath audio_path;
   std::string key;
   std::string title;
   std::string page;

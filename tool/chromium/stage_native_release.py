@@ -39,7 +39,13 @@ VIDEO_CAPTURE_CHECKS = {'capture_screen_and_quality_options', 'native_capture_do
     'hls_resolved_to_mp4_parts', 'hls_pause', 'hls_resume', 'hls_survives_hub_navigation',
     'hls_exact_assembled_bytes', 'hls_partial_files_removed', 'hls_cancel', 'hls_cancel_not_in_library',
     'hls_automatically_in_library', 'hls_saved_video_playable', 'same_document_video_change_rejected',
-    'stale_source_document_rejected', 'hls_pause_at_part_boundary'}
+    'stale_source_document_rejected', 'hls_pause_at_part_boundary',
+    'youtube_adaptive_pair_detected', 'youtube_adaptive_pair_exact_bytes',
+    'protected_dash_rejected', 'dash_external_entities_rejected', 'dash_missing_declared_audio_rejected',
+    'dash_segment_list_and_timeline_resolved', 'dash_numbered_template_resolved',
+    'dash_tracks_exact_original_bytes', 'dash_library_includes_companion_audio',
+    'dash_video_and_audio_play_together', 'dash_seek_rate_and_volume_synchronized',
+    'dash_pause_stops_audio', 'dash_pair_survives_browser_restart'}
 
 
 def require(condition: bool, message: str) -> None:

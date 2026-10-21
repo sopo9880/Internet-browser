@@ -66,6 +66,11 @@ base::DictValue ReadVideoLibraryWithDownloads(const base::FilePath& state,
         if (!title) continue;
         CompletedVideoDownload video;
         video.path = directory.AppendASCII("video.mp4");
+        if (metadata->FindBool("separateAudio").value_or(false)) {
+          video.audio_path = directory.AppendASCII("audio.mp4");
+          base::File::Info info;
+          if (base::IsLink(video.audio_path) || !base::GetFileInfo(video.audio_path, &info) || info.is_directory) continue;
+        }
         video.key = "stream:" + directory.BaseName().AsUTF8Unsafe();
         video.title = NormalizeVideoTitle(*title);
         if (const auto* page = metadata->FindString("sourcePage"); page && GURL(*page).SchemeIsHTTPOrHTTPS()) video.page = *page;
@@ -105,6 +110,7 @@ base::DictValue ReadVideoLibraryWithDownloads(const base::FilePath& state,
     item.Set("name", download.key);
     item.Set("title", download.title);
     item.Set("sourcePage", download.page);
+    if (!download.audio_path.empty()) item.Set("audioUrl", net::FilePathToFileURL(download.audio_path).spec());
     base::DictValue metadata;
     metadata.Set("title", download.title);
     metadata.Set("sourcePage", download.page);

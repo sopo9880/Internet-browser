@@ -25,6 +25,7 @@
 #include "content/public/browser/weak_document_ptr.h"
 #include "content/public/common/referrer.h"
 #include "ui/base/page_transition_types.h"
+#include "net/base/filename_util.h"
 #include "url/gurl.h"
 #include "build/build_config.h"
 #include "url/url_constants.h"
@@ -172,6 +173,13 @@ bool InstallVideoPlayer(content::WebContents* contents, base::DictValue library,
       return false;
     if (*item->FindString("url") == selected)
       selected_index = i;
+    if (const auto* companion = item->FindString("audioUrl")) {
+      base::FilePath video_path, audio_path;
+      if (!net::FileURLToFilePath(GURL(*item->FindString("url")), &video_path) ||
+          !net::FileURLToFilePath(GURL(*companion), &audio_path) ||
+          audio_path.DirName() != video_path.DirName() ||
+          audio_path.BaseName().AsUTF8Unsafe() != "audio.mp4") return false;
+    }
   }
   if (selected_index == videos->size())
     return false;

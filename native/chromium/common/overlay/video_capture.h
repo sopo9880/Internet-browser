@@ -34,6 +34,7 @@ class VideoCapture : public base::SupportsUserData::Data {
     GURL source_url;
     base::DictValue data;
     std::vector<GURL> parts;
+    std::vector<GURL> audio_parts;
   };
   void Inspected(std::string token, Reply reply, base::DictValue result);
   void Scanned(content::WeakDocumentPtr document, base::Value value);

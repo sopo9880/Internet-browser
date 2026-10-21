@@ -361,7 +361,9 @@ Android device acceptance is separate.
 The hub now has a unified Video Save section. An explicit scan inspects HTTP(S)
 tabs and frames in the exact same profile, including media elements, video
 metadata, bounded resource history and embedded JSON. It recognizes direct files,
-available unciphered YouTube muxed formats and Instagram/JSON-LD video addresses.
+available unciphered YouTube muxed/adaptive MP4 formats and Instagram/JSON-LD video
+addresses. Adaptive MP4 saves retain the selected video with the highest-bitrate
+available MP4 audio track, rather than offering a silent video-only file.
 Only discovered opaque candidate IDs can start downloads; arbitrary hub-supplied
 addresses are not accepted. Source document lifetime, active state and URL are
 rechecked, including same-document navigation and back-forward cached pages.
@@ -378,17 +380,28 @@ manifest/part uses the standard frame-bound downloader; no safety verdict is
 overridden. A profile-owned job survives leaving the hub. Parts are assembled on
 a sequenced worker, and a completion marker registers only finished files in the
 library. Pause takes effect at a part boundary; cancellation removes partials.
-Keep the source tab open. Limits are 4 active jobs, 20,000 parts, 256 MiB per part,
-8 GiB total and bounded manifest/address data. Interrupted parts can be retried;
+Keep the source tab open. Limits are 4 active jobs, 20,000 media parts per track,
+8 GiB combined video/audio and bounded manifest/address data. Interrupted parts can be retried;
 in-progress stream jobs do not resume across a complete browser restart.
 
-The controlled native browser test passed 21 checks: the actual save screen and
+Static single-period MP4 DASH supports SegmentList, whole MP4 BaseURL tracks and
+SegmentTemplate with duration or SegmentTimeline, inherited template attributes,
+number/time formatting, RepresentationID and Bandwidth substitution. XML is
+parsed with Chromium's isolated data decoder. DTD/external entities, protected
+tracks, missing declared audio and unsupported ranges/formats are refused.
+Video and audio retain their original bytes as a library pair. The player keeps
+play/pause, seeking, rate and volume together, and the pair survives a browser
+restart. This is not a single muxed MP4 export; the UI states that limitation.
+
+The controlled native browser test passed 34 checks covering the actual save screen and
 quality choices, byte-identical file download, generic/YouTube/Instagram data
 discovery, profile separation, encrypted HLS refusal, HLS variant selection,
 pause/resume/cancel, hub-navigation survival, exact MP4 assembly, cleanup, library
-registration, offline playback and rejection of stale documents/SPA URLs. This
+registration, offline playback and rejection of stale documents/SPA URLs. It also
+checks adaptive MP4 pairs, DASH XML/template resolution, original video/audio
+bytes, synchronized playback/controls and durable pairs across browser restart. This
 is controlled-page evidence, **not live YouTube/Instagram compatibility evidence**.
-The JavaScript discovery suite has 8 checks; release staging additionally requires
+The JavaScript discovery suite has 9 checks; release staging additionally requires
 the full native video smoke and its exact engine DLL hash.
 The updated Windows source browser also passed all 22 existing native smoke
 checks, retaining bookmark import, extension fixture behavior, subtitles,
@@ -396,8 +409,8 @@ playback/resume and unchanged legacy data. The 115 Python tests passed with 3
 environment-specific skips; HLS C++ parser checks and workflow lint passed.
 
 Still required for the requested broader downloader: live site acceptance,
-YouTube signature-dependent/adaptive formats, DASH and separate audio/video
-muxing, MPEG-TS remuxing, additional playlist features and live streams. These
+YouTube signature-dependent formats, single-file audio/video export,
+MPEG-TS remuxing, additional playlist features and live streams. These
 cases display explicit reasons instead of pretending a playlist or video-only
 track is a completed offline movie. DRM decryption is not implemented. The
 installed development app and previous installer do not contain these changes.

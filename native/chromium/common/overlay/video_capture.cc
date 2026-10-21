@@ -87,13 +87,20 @@ void VideoCapture::Scanned(content::WeakDocumentPtr document, base::Value value)
         const auto* address = item->FindString("url");
         const auto* kind = item->FindString("kind");
         if (!address || address->size() > 16384 || !Remote(GURL(*address)) || !kind ||
-            (*kind != "file" && *kind != "hls" && *kind != "dash")) continue;
+            (*kind != "file" && *kind != "hls" && *kind != "dash" && *kind != "pair")) continue;
         auto row = item->Clone();
+        std::vector<GURL> video_parts, audio_parts;
+        if (*kind == "pair") {
+          const auto* audio = item->FindString("audioUrl");
+          if (!audio || audio->size() > 16384 || !Remote(GURL(*audio))) continue;
+          video_parts.emplace_back(*address); audio_parts.emplace_back(*audio);
+          row.Set("kind", "stream"); row.Set("paired", true);
+        }
         row.Set("title", NormalizeVideoTitle(item->FindString("title") ? *item->FindString("title") : "영상"));
         row.Set("page", content::WebContents::FromRenderFrameHost(frame)->GetLastCommittedURL().spec());
         const auto token = base::UnguessableToken::Create().ToString();
         row.Set("token", token);
-        candidates_.emplace(token, Candidate{document, frame->GetLastCommittedURL().GetWithoutRef(), row.Clone(), {}});
+        candidates_.emplace(token, Candidate{document, frame->GetLastCommittedURL().GetWithoutRef(), row.Clone(), std::move(video_parts), std::move(audio_parts)});
         found_.Append(std::move(row));
       }
     }
@@ -135,7 +142,7 @@ void VideoCapture::Download(const std::string& token, Reply reply) {
     }
     auto job = std::make_unique<VideoStream>(profile_, candidate.document, *candidate.data.FindString("title"), *candidate.data.FindString("page"));
     auto* pointer = job.get(); streams_.push_back(std::move(job));
-    pointer->Start(candidate.parts, std::move(reply)); return;
+    pointer->Start(candidate.parts, std::move(reply), candidate.audio_parts); return;
   }
   if (*candidate.data.FindString("kind") != "file") {
     std::move(reply).Run(Error("먼저 스트림 확인을 눌러 저장 가능한 화질을 선택해 주세요.")); return;
@@ -186,18 +193,16 @@ void VideoCapture::Inspect(const std::string& token, Reply reply) {
   if (!frame || !frame->IsActive() || frame->GetLastCommittedURL().GetWithoutRef() != it->second.source_url) {
     std::move(reply).Run(Error("원본 페이지가 바뀌었습니다. 영상을 다시 검사해 주세요.")); return;
   }
-  if (*it->second.data.FindString("kind") == "dash") {
-    std::move(reply).Run(Error("이 영상은 DASH 스트림입니다. 분리된 영상·음성 트랙의 MP4 합치기를 아직 지원하지 않습니다.")); return;
-  }
   std::erase_if(streams_, [](const auto& job) { const auto status = job->Status(); return status.FindBool("inspection").value_or(false) && status.FindInt("state").value_or(0) != 0; });
   const auto active = std::count_if(streams_.begin(), streams_.end(), [](const auto& job) { return job->Status().FindInt("state").value_or(0) == 0; });
-  if (*it->second.data.FindString("kind") != "hls" || active >= 4 || profile_->IsOffTheRecord()) {
+  const auto kind = *it->second.data.FindString("kind");
+  if ((kind != "hls" && kind != "dash") || active >= 4 || profile_->IsOffTheRecord()) {
     std::move(reply).Run(Error("이 창에서 스트림을 확인할 수 없습니다.")); return;
   }
   auto job = std::make_unique<VideoStream>(profile_, it->second.document, *it->second.data.FindString("title"), *it->second.data.FindString("page"));
   auto* pointer = job.get(); streams_.push_back(std::move(job));
   pointer->Inspect(GURL(*it->second.data.FindString("url")),
-      base::BindOnce(&VideoCapture::Inspected, weak_factory_.GetWeakPtr(), token, std::move(reply)));
+      base::BindOnce(&VideoCapture::Inspected, weak_factory_.GetWeakPtr(), token, std::move(reply)), kind == "dash");
 }
 void VideoCapture::Inspected(std::string token, Reply reply, base::DictValue result) {
   if (result.Find("error")) { std::move(reply).Run(std::move(result)); return; }
@@ -211,6 +216,29 @@ void VideoCapture::Inspected(std::string token, Reply reply, base::DictValue res
   const auto source_url = it->second.source_url;
   auto original = it->second.data.Clone();
   base::ListValue rows;
+  if (const auto* variants = result.FindList("dashVariants")) {
+    for (const auto& value : *variants) {
+      if (candidates_.size() >= 400) break;
+      const auto& variant = value.GetDict();
+      std::vector<GURL> video, audio;
+      size_t bytes = 0;
+      const auto read = [&](const char* key, std::vector<GURL>& urls) {
+        const auto* list = variant.FindList(key); if (!list || list->size() > 20001) return false;
+        for (const auto& part : *list) {
+          if (!part.is_string() || !Remote(GURL(part.GetString())) || part.GetString().size() > 16384 || (bytes += part.GetString().size()) > 16 * 1024 * 1024) return false;
+          urls.emplace_back(part.GetString());
+        }
+        return true;
+      };
+      if (!read("parts", video) || !read("audioParts", audio) || video.empty()) continue;
+      auto row = original.Clone(); const auto id = base::UnguessableToken::Create().ToString();
+      row.Set("token", id); row.Set("kind", "stream"); row.Set("paired", !audio.empty());
+      if (const auto* quality = variant.FindString("quality")) row.Set("quality", *quality);
+      if (const auto* language = variant.FindString("audioLanguage"); language && !language->empty()) row.Set("audioLanguage", *language);
+      candidates_.emplace(id, Candidate{document, source_url, row.Clone(), std::move(video), std::move(audio)});
+      rows.Append(std::move(row));
+    }
+  }
   if (const auto* variants = result.FindList("variants")) {
     for (const auto& value : *variants) {
       const auto& variant = value.GetDict();

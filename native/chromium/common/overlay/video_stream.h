@@ -22,8 +22,8 @@ class VideoStream : public download::DownloadItem::Observer {
   using Reply = base::OnceCallback<void(base::DictValue)>;
   VideoStream(Profile* profile, content::WeakDocumentPtr document, std::string title, std::string page);
   ~VideoStream() override;
-  void Inspect(GURL manifest, Reply reply);
-  void Start(std::vector<GURL> parts, Reply reply);
+  void Inspect(GURL manifest, Reply reply, bool dash = false);
+  void Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts = {});
   base::DictValue Status() const;
   bool Control(const std::string& action);
   void OnDownloadUpdated(download::DownloadItem* item) override;
@@ -36,6 +36,7 @@ class VideoStream : public download::DownloadItem::Observer {
   void PartReady(base::FilePath path, GURL final_url);
   void Appended(bool success);
   void Inspected(GURL final_url, std::string body);
+  void FinishInspection(base::DictValue result);
   void Finalized(bool success);
   void Fail(const char* error);
   void Cleanup();
@@ -46,9 +47,10 @@ class VideoStream : public download::DownloadItem::Observer {
   base::FilePath directory_;
   std::vector<GURL> parts_;
   size_t completed_ = 0;
+  size_t audio_start_ = 0;
   double received_ = 0;
   int state_ = 0;
-  bool inspect_ = false, paused_ = false, waiting_ = false;
+  bool inspect_ = false, dash_ = false, paused_ = false, waiting_ = false;
   Reply reply_;
   scoped_refptr<base::SequencedTaskRunner> worker_;
   base::ScopedObservation<download::DownloadItem, download::DownloadItem::Observer> observation_{this};

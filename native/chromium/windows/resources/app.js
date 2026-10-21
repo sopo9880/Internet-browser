@@ -173,7 +173,7 @@ scanButton.addEventListener('click', async () => {
       const select = document.createElement('select'); select.setAttribute('aria-label', '저장할 영상과 화질');
       for (const [index, item] of items.entries()) {
         const option = document.createElement('option'); option.value = String(index);
-        option.textContent = `${item.quality || '원본 화질'} · ${item.kind === 'stream' ? '저장 가능한 MP4 스트림' : item.kind === 'file' ? (item.mime || '영상 파일') : item.kind.toUpperCase()} · ${index + 1}`;
+        option.textContent = `${item.quality || '원본 화질'} · ${item.paired ? '영상+음성 함께 저장' : item.kind === 'stream' ? '저장 가능한 MP4 스트림' : item.kind === 'file' ? (item.mime || '영상 파일') : item.kind.toUpperCase()} · ${index + 1}`;
         select.append(option);
       }
       const save = document.createElement('button'); save.textContent = '영상 저장';
@@ -190,7 +190,7 @@ scanButton.addEventListener('click', async () => {
             for (const item of response.items || []) {
               const index = items.length; items.push(item);
               const option = document.createElement('option'); option.value = String(index);
-              option.textContent = `${item.quality || '원본 화질'} · ${item.kind === 'stream' ? '저장 가능한 MP4 스트림' : 'HLS 화질 선택'}`;
+              option.textContent = `${item.quality || '원본 화질'} · ${item.paired ? '영상+음성 함께 저장' : item.kind === 'stream' ? '저장 가능한 MP4 스트림' : 'HLS 화질 선택'}${item.audioLanguage ? ` · 음성 ${item.audioLanguage}` : ''}`;
               select.append(option);
             }
             if (response.items?.length) {

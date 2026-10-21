@@ -34,6 +34,29 @@ def server(media: Path):
         offset += size
     if len(boundaries) < 2: raise ValueError('Fixture needs fragmented MP4')
     chunks = {'/init.mp4': video[:boundaries[0]], '/one.m4s': video[boundaries[0]:boundaries[1]], '/two.m4s': video[boundaries[1]:]}
+    dash_video = (media/'bear-640x360-v_frag.mp4').read_bytes()
+    dash_audio = (media/'bear-640x360-a_frag.mp4').read_bytes()
+    def split_track(data):
+        offset = 0
+        while offset + 8 <= len(data):
+            size, kind = struct.unpack_from('>I4s', data, offset)
+            if kind == b'sidx': return data[:offset], data[offset:]
+            if size < 8: break
+            offset += size
+        raise ValueError('Controlled DASH track needs MP4 fragments')
+    vi, vp = split_track(dash_video); ai, ap = split_track(dash_audio)
+    chunks.update({'/dash-v-init.mp4':vi, '/dash-v-000.m4s':vp, '/dash-v-001.m4s':vp,
+        '/dash-a-init.mp4':ai, '/dash-a-001.m4s':ap, '/dash-video.mp4':dash_video, '/dash-audio.mp4':dash_audio})
+    dash = '''<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT2.8S"><Period>
+    <AdaptationSet contentType="video" mimeType="video/mp4">
+      <Representation id="v" height="360" bandwidth="450000"><SegmentList><Initialization sourceURL="dash-v-init.mp4"/><SegmentURL media="dash-v-000.m4s"/></SegmentList></Representation>
+      <Representation id="v2" height="360" bandwidth="460000"><SegmentTemplate initialization="dash-v-init.mp4" media="dash-v-$Time%03d$.m4s" timescale="10"><SegmentTimeline><S t="0" d="30" r="0"/></SegmentTimeline></SegmentTemplate></Representation>
+    </AdaptationSet><AdaptationSet contentType="audio" mimeType="audio/mp4" lang="ko"><Representation id="a" bandwidth="128000"><BaseURL>dash-audio.mp4</BaseURL></Representation></AdaptationSet>
+    </Period></MPD>'''
+    template = '''<MPD type="static" mediaPresentationDuration="PT2.8S"><Period>
+    <AdaptationSet mimeType="video/mp4"><SegmentTemplate initialization="dash-v-init.mp4" duration="3" startNumber="1"/><Representation id="v" height="360"><SegmentTemplate media="dash-v-$Number%03d$.m4s"/></Representation></AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4"><Representation id="a"><SegmentTemplate initialization="dash-a-init.mp4" media="dash-a-$Number%03d$.m4s" duration="3" startNumber="1"/></Representation></AdaptationSet>
+    </Period></MPD>'''
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split('?')[0]
@@ -50,16 +73,25 @@ def server(media: Path):
                 mime = 'application/vnd.apple.mpegurl'
             elif route == '/encrypted.m3u8':
                 body = b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\none.ts\n#EXT-X-ENDLIST\n'; mime = 'application/vnd.apple.mpegurl'
+            elif route in ['/dash.mpd','/dash-template.mpd','/dash-protected.mpd','/dash-external.mpd','/dash-empty-audio.mpd']:
+                text = template if route == '/dash-template.mpd' else dash
+                if route == '/dash-protected.mpd': text = text.replace('<Period>', '<Period><ContentProtection schemeIdUri="urn:uuid:controlled-protected"/>')
+                if route == '/dash-external.mpd': text = '<!DOCTYPE MPD [<!ENTITY secret SYSTEM "file:///private">]>'+dash
+                if route == '/dash-empty-audio.mpd': text = dash.replace('<Representation id="a" bandwidth="128000"><BaseURL>dash-audio.mp4</BaseURL></Representation>', '')
+                body = text.encode(); mime = 'application/dash+xml'
             elif route == '/generic':
                 body = '<title>일반 영상 테스트</title><video controls src="/clip.webm" preload="metadata"></video>'.encode()
             elif route == '/youtube':
-                data = {'streamingData': {'formats': [{'url': self.base+'/muxed.mp4', 'mimeType': 'video/mp4', 'qualityLabel': '360p'}]}}
+                data = {'streamingData': {'formats': [{'url': self.base+'/muxed.mp4', 'mimeType': 'video/mp4', 'qualityLabel': '360p'}],
+                    'adaptiveFormats': [{'url':self.base+'/dash-video.mp4','mimeType':'video/mp4','qualityLabel':'360p'},
+                        {'url':self.base+'/dash-audio.mp4','mimeType':'audio/mp4','bitrate':128000}]}}
                 body = ('<title>YouTube 형식 테스트</title><script>var ytInitialPlayerResponse = '+json.dumps(data)+';</script>').encode()
             elif route == '/instagram':
                 body = '<title>Instagram 형식 테스트</title><meta property="og:video" content="/reel.mp4"><meta property="og:video:type" content="video/mp4">'.encode()
             elif route == '/hls':
                 body = b'<title>HLS fixture</title><video src="/master.m3u8"></video><video src="/encrypted.m3u8"></video>'
             elif route == '/private': body = b'<title>Private fixture</title><video src="/private.webm"></video>'
+            elif route == '/dash': body = b'<title>DASH fixture</title><video src="/dash.mpd"></video><video src="/dash-template.mpd"></video><video src="/dash-protected.mpd"></video><video src="/dash-external.mpd"></video><video src="/dash-empty-audio.mpd"></video>'
             else:
                 self.send_error(404); return
             self.send_response(200)
@@ -73,7 +105,7 @@ def server(media: Path):
     http = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     Handler.base = f'http://127.0.0.1:{http.server_port}'
     thread = Thread(target=http.serve_forever, daemon=True); thread.start()
-    try: yield Handler.base, video, webm
+    try: yield Handler.base, video, webm, dash_video, dash_audio
     finally: http.shutdown(); http.server_close(); thread.join(timeout=5)
 
 
@@ -105,9 +137,11 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 target = cdp.call('Target.createTarget', {'url': url, **extra})['targetId']
                 session = cdp.call('Target.attachToTarget', {'targetId':target, 'flatten':True})['sessionId']
                 cdp.call('Page.enable', session=session)
+                cdp.call('Runtime.enable', session=session)
+                cdp.call('Log.enable', session=session)
                 eventually(lambda: cdp.evaluate(session, 'document.readyState === "complete"'))
                 return target, session
-            with server(media) as (base, video, webm):
+            with server(media) as (base, video, webm, dash_video, dash_audio):
                 pages = [open_page(base+route) for route in ['/generic','/youtube','/instagram','/hls']]
                 context = cdp.call('Target.createBrowserContext')['browserContextId']
                 open_page(base+'/private', browserContextId=context)
@@ -185,10 +219,65 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 _, hub = open_page('chrome://internet-browser/')
                 stale = api('download', generic['token'])
                 checks['stale_source_document_rejected'] = bool(stale.get('error'))
+                open_page(base+'/dash')
+                discovered = api('scan')
+                yt_pair = next(row for row in discovered['items'] if row.get('paired') and row['page'].endswith('/youtube'))
+                checks['youtube_adaptive_pair_detected'] = yt_pair['quality']=='360p'
+                yt_saved = api('download', yt_pair['token'])
+                if not yt_saved.get('started'): raise RuntimeError(str(yt_saved))
+                yt_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==yt_saved['guid'] and row['state'] in (1,3)),None))
+                if yt_status['state']!=1: raise RuntimeError(str(yt_status))
+                yt_marker = next(path for path in profile.glob('*/InternetBrowserVideos/*/complete.json') if json.loads(path.read_text(encoding='utf-8')).get('title')=='YouTube 형식 테스트')
+                checks['youtube_adaptive_pair_exact_bytes'] = yt_marker.with_name('video.mp4').read_bytes()==dash_video and yt_marker.with_name('audio.mp4').read_bytes()==dash_audio
+                def dash_candidate(suffix): return next(row for row in discovered['items'] if row['url'].endswith(suffix))
+                protected = api('inspect', dash_candidate('/dash-protected.mpd')['token'])
+                checks['protected_dash_rejected'] = '보호' in protected.get('error','')
+                external = api('inspect', dash_candidate('/dash-external.mpd')['token'])
+                checks['dash_external_entities_rejected'] = bool(external.get('error'))
+                incomplete = api('inspect', dash_candidate('/dash-empty-audio.mpd')['token'])
+                checks['dash_missing_declared_audio_rejected'] = bool(incomplete.get('error'))
+                resolved = api('inspect', dash_candidate('/dash.mpd')['token'])
+                if resolved.get('error'): raise RuntimeError(resolved['error'])
+                variants = resolved['items']
+                checks['dash_segment_list_and_timeline_resolved'] = len(variants)==2 and all(row.get('paired') and row['quality']=='360p' for row in variants)
+                numbered = api('inspect', dash_candidate('/dash-template.mpd')['token'])
+                checks['dash_numbered_template_resolved'] = len(numbered.get('items',[]))==1 and numbered['items'][0].get('paired') is True
+                saved_pair = api('download', variants[1]['token'])
+                if not saved_pair.get('started'): raise RuntimeError(str(saved_pair))
+                pair_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==saved_pair['guid'] and row['state'] in (1,3)),None))
+                if pair_status['state']!=1: raise RuntimeError(str(pair_status))
+                pair_marker = next(path for path in profile.glob('*/InternetBrowserVideos/*/complete.json') if json.loads(path.read_text(encoding='utf-8')).get('title')=='DASH fixture')
+                checks['dash_tracks_exact_original_bytes'] = pair_marker.with_name('video.mp4').read_bytes()==dash_video and pair_marker.with_name('audio.mp4').read_bytes()==dash_audio
+                pair_row = next(row for row in library()['videos'] if row['title']=='DASH fixture')
+                checks['dash_library_includes_companion_audio'] = pair_row.get('audioUrl','').endswith('/audio.mp4')
+                report['stage'] = 'open_dash_offline_pair'
+                cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserOpenVideo",'+json.dumps(pair_row['url'])+');})()')
+                cdp.call('Page.bringToFront', session=hub)
+                eventually(lambda: cdp.evaluate(hub, 'document.querySelector("#internet-browser-companion-audio")?.readyState>=1 && document.querySelector("video")?.readyState>=1'))
+                report['stage'] = 'play_dash_offline_pair'
+                cdp.evaluate(hub, '[...document.querySelectorAll(".ib-controls button")].find(button=>button.textContent==="재생").click()', user_gesture=True)
+                checks['dash_video_and_audio_play_together'] = eventually(lambda: cdp.evaluate(hub, '(()=>{const v=document.querySelector("video"),a=document.querySelector("audio");return !v.paused&&!a.paused&&v.currentTime>0.1&&a.currentTime>0.1&&Math.abs(v.currentTime-a.currentTime)<0.25;})()'))
+                cdp.evaluate(hub, '(()=>{const v=document.querySelector("video");v.currentTime=0.6;v.playbackRate=1.5;v.volume=0.3;})()')
+                checks['dash_seek_rate_and_volume_synchronized'] = eventually(lambda: cdp.evaluate(hub, '(()=>{const v=document.querySelector("video"),a=document.querySelector("audio");return a.playbackRate===1.5&&Math.abs(a.volume-0.3)<0.001&&Math.abs(a.currentTime-v.currentTime)<0.25;})()'))
+                cdp.evaluate(hub, 'document.querySelector("video").pause()')
+                checks['dash_pause_stops_audio'] = eventually(lambda: cdp.evaluate(hub, 'document.querySelector("video").paused && document.querySelector("audio").paused'))
+                # The pair is a durable library entry, not an in-memory job.
+                command = browser.args
+                cdp.call('Browser.close'); cdp.close(); cdp = None; browser.wait(timeout=20)
+                endpoint.unlink(missing_ok=True)
+                browser = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+                port = eventually(lambda: endpoint.read_text().splitlines()[0] if endpoint.exists() else None)
+                cdp = Cdp(json.load(urlopen(f'http://127.0.0.1:{port}/json/version'))['webSocketDebuggerUrl'])
+                _, hub = open_page('chrome://internet-browser/')
+                durable = next(row for row in library()['videos'] if row['title']=='DASH fixture')
+                checks['dash_pair_survives_browser_restart'] = durable.get('audioUrl')==pair_row['audioUrl'] and durable['url']==pair_row['url']
                 report['assembled_mp4_sha256'] = hashlib.sha256(video).hexdigest()
                 report['all_checks_passed'] = all(checks.values())
         except Exception as error:
             report['error'] = repr(error); report['all_checks_passed'] = False
+            if cdp:
+                try: report['final_page'] = cdp.evaluate(hub, '({url:location.href,visibility:document.visibilityState,text:document.body?.innerText?.slice(-1600),media:[...document.querySelectorAll("video,audio")].map(v=>({tag:v.tagName,src:v.currentSrc||v.src,readyState:v.readyState,networkState:v.networkState,preload:v.preload,paused:v.paused,time:v.currentTime,error:v.error?{code:v.error.code,message:v.error.message}:null}))})')
+                except Exception: pass
         finally:
             if cdp:
                 report['diagnostics'] = cdp.diagnostics

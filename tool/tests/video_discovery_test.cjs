@@ -71,3 +71,14 @@ test('a loaded extensionless video remains discoverable without inventing its co
   assert.equal(result.items[0].mime, 'video/unknown');
   assert.equal(result.documentUrl, 'https://example.test/watch');
 });
+test('unciphered YouTube adaptive MP4 formats retain the selected video and highest-bitrate audio', () => {
+  const payload = {streamingData:{adaptiveFormats:[
+    {url:'https://cdn.test/video.mp4',mimeType:'video/mp4; codecs="avc1"',qualityLabel:'1080p'},
+    {url:'https://cdn.test/a-low.m4a',mimeType:'audio/mp4',bitrate:64000},
+    {url:'https://cdn.test/a-high.m4a',mimeType:'audio/mp4',bitrate:128000},
+    {url:'file:///private.m4a',mimeType:'audio/mp4',bitrate:999999}
+  ]}};
+  const result=scan({scripts:[{type:'',textContent:'var ytInitialPlayerResponse = '+JSON.stringify(payload)+';'}]});
+  assert.equal(result.items.length,1);assert.equal(result.items[0].kind,'pair');
+  assert.equal(result.items[0].quality,'1080p');assert.equal(result.items[0].audioUrl,'https://cdn.test/a-high.m4a');
+});

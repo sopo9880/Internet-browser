@@ -4,7 +4,13 @@
   const reasons = new Set();
   const title = (document.querySelector('meta[property="og:title"]')?.content || document.title || '영상').slice(0, 200);
   const protectedMedia = [...document.querySelectorAll('video')].some(v => v.mediaKeys);
-  function add(address, type = '', quality = '', source = 'page') {
+  function remote(address) {
+    try {
+      const url = new URL(address, document.baseURI);
+      return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && url.href.length <= 16384 ? url : null;
+    } catch { return null; }
+  }
+  function add(address, type = '', quality = '', source = 'page', audioAddress = '') {
     if (typeof address !== 'string' || address.length > 16384 || items.size >= 60) return;
     let url;
     try { url = new URL(address, document.baseURI); } catch { return; }
@@ -16,10 +22,13 @@
       : /\.mpd$/.test(path) || mime === 'application/dash+xml' ? 'dash' : 'file';
     if (kind === 'file' && !mime.startsWith('video/') && !/\.(mp4|webm|mov|m4v|mkv|avi|3gp|m2ts|ts|flv)$/.test(path)) return;
     if (protectedMedia) { reasons.add('보호된 재생이 감지되어 이 페이지의 영상을 저장할 수 없습니다.'); return; }
-    const key = url.href;
+    const audio = audioAddress ? remote(audioAddress) : null;
+    if (audioAddress && !audio) return;
+    if (audio) kind = 'pair';
+    const key = url.href + (audio ? '|'+audio.href : '');
     const previous = items.get(key);
     if (previous && (!quality || previous.quality)) return;
-    items.set(key, {url: key, title, kind, mime, quality: String(quality || '').slice(0, 80), source});
+    items.set(key, {url: url.href, audioUrl: audio?.href || '', title, kind, mime, quality: String(quality || '').slice(0, 80), source});
   }
   for (const video of document.querySelectorAll('video')) {
     add(video.currentSrc || video.src, video.getAttribute('type') || (video.videoHeight > 0 ? 'video/unknown' : ''), video.videoHeight ? `${video.videoHeight}p` : '');
@@ -41,14 +50,23 @@
         reasons.add('페이지의 영상이 바뀌었습니다. 원본 탭을 새로고침한 뒤 다시 검사하세요.'); return;
       }
       const streams = value.streamingData;
-      for (const format of streams.formats || []) {
+      const formats = Array.isArray(streams.formats) ? streams.formats.slice(0, 100) : [];
+      const adaptive = Array.isArray(streams.adaptiveFormats) ? streams.adaptiveFormats.slice(0, 400) : [];
+      for (const format of formats) {
         if (format.url) add(format.url, format.mimeType, format.qualityLabel || format.quality, 'youtube');
         else if (format.signatureCipher || format.cipher) reasons.add('이 YouTube 영상은 서명 처리가 필요한 스트림만 제공합니다. 현재 저장할 수 없습니다.');
       }
       if (streams.hlsManifestUrl) add(streams.hlsManifestUrl, 'application/vnd.apple.mpegurl', '', 'youtube');
       if (streams.dashManifestUrl) add(streams.dashManifestUrl, 'application/dash+xml', '', 'youtube');
-      if (!(streams.formats || []).some(f => f.url) && streams.adaptiveFormats?.length)
-        reasons.add('이 YouTube 영상은 영상·음성 트랙이 분리되어 있습니다. 합치기 지원이 필요합니다.');
+      const audio = adaptive.filter(f => typeof f.mimeType === 'string' && f.mimeType.startsWith('audio/mp4') && typeof f.url === 'string' && remote(f.url))
+        .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0))[0];
+      let pairs = 0;
+      if (audio) for (const format of adaptive) {
+        if (typeof format.mimeType !== 'string' || !format.mimeType.startsWith('video/mp4') || typeof format.url !== 'string' || !remote(format.url)) continue;
+        add(format.url, format.mimeType, format.qualityLabel || format.quality, 'youtube', audio.url); ++pairs;
+      }
+      if (!formats.some(f => f.url) && adaptive.length && !pairs)
+        reasons.add('영상·음성의 직접 MP4 주소를 확인하지 못했습니다. 서명 처리나 지원하지 않는 형식이 필요할 수 있습니다.');
     }
     for (const [key, child] of Object.entries(value)) {
       if (typeof child === 'string' && ['video_url', 'contentUrl', 'content_url'].includes(key)) add(child, 'video/mp4');
