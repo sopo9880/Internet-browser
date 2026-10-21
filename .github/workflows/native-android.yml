@@ -1,0 +1,98 @@
+name: Native Android product source build (no release)
+on:
+  workflow_call:
+    inputs:
+      phase:
+        type: string
+        default: product-objects
+      jobs:
+        type: string
+        default: '2'
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Product objects before merge; complete APK only on main
+        type: choice
+        options: [product-objects, apk]
+        default: product-objects
+      jobs:
+        description: Local compiler workers
+        type: choice
+        options: ['1', '2', '3']
+        default: '2'
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    outputs:
+      version_code: ${{ steps.version.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate native build phase and product version
+        id: version
+        env:
+          BUILD_PHASE: ${{ inputs.phase }}
+          COMPILER_JOBS: ${{ inputs.jobs }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from tool.release_metadata import parse_pubspec
+          phase = os.environ['BUILD_PHASE']
+          if phase not in ('product-objects', 'apk') or os.environ['COMPILER_JOBS'] not in ('1', '2', '3'):
+              raise SystemExit('Invalid native Android build phase/jobs')
+          product = json.loads(Path('native/chromium/product.json').read_text())
+          if phase == 'apk':
+              if os.environ['GITHUB_REF'] != 'refs/heads/main':
+                  raise SystemExit('The formal native APK is built only from main')
+              version = parse_pubspec(Path('pubspec.yaml').read_text())
+              if version.version != product['app_version']:
+                  raise SystemExit('Native product/release versions must match before APK compilation')
+          else:
+              version = parse_pubspec('version: ' + product['app_version'] + '+1\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version_code={version.version_code}\n')
+          PY
+      - name: Check source-builder packaging safeguards
+        run: python3 -m unittest discover -s tool/tests -p test_native_android_build.py -v
+  native_android:
+    needs: policy
+    runs-on: [self-hosted, Linux, X64, chromium-wsl2]
+    concurrency:
+      group: internet-browser-local-native-compile
+      cancel-in-progress: false
+    timeout-minutes: 1440
+    env:
+      NATIVE_WORKSPACE: ${{ vars.CHROMIUM_ANDROID_WORKSPACE }}
+      BUILD_PHASE: ${{ inputs.phase }}
+      COMPILER_JOBS: ${{ inputs.jobs }}
+      VERSION_CODE: ${{ needs.policy.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check preprovisioned Linux builder tools
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          for program in python3 git make; do command -v "$program" >/dev/null; done
+          python3 -c 'import PIL; print("Pillow available:", PIL.__version__)'
+      - name: Compile the validated native Android product
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$NATIVE_WORKSPACE" ]; then NATIVE_WORKSPACE="$HOME/internet-browser-v022-native"; fi
+          EXTRA=()
+          if [ "$BUILD_PHASE" = product-objects ]; then EXTRA+=(--product-objects-only); fi
+          python3 tool/chromium/build_native_android.py \
+            --workspace "$NATIVE_WORKSPACE" --stage build/native-android \
+            --version-code "$VERSION_CODE" --jobs "$COMPILER_JOBS" "${EXTRA[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android-v022-${{ inputs.phase }}-not-release
+          path: build/native-android/**
+          if-no-files-found: error
+          retention-days: 14

@@ -1,8 +1,15 @@
 # Internet-browser
 
-Windows + Android browser — v0.2.0 development (single DPI + media + Chromium extensions milestone).
+Windows + Android browser — v0.2.2 native Chromium migration in progress.
 
-Latest published release: [v0.1.1](https://github.com/sopo9880/Internet-browser/releases/tag/v0.1.1).
+Latest published release: [v0.2.1](https://github.com/sopo9880/Internet-browser/releases/tag/v0.2.1).
+
+Windows v0.2.2 is moving to source-built native Chromium, including the product
+name/icon and native extension toolbar and popup. Android retains its Chromium
+source fork. The migration is tracked in [PR #10](https://github.com/sopo9880/Internet-browser/pull/10)
+and [the integration checklist](docs/NATIVE_CHROMIUM_V022.md). The current
+Windows release is still Flutter/WebView2; a v0.2.2 build or release has not
+been validated yet. The sections below describe earlier development milestones.
 
 ## v0.1.1 changes
 

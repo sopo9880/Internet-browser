@@ -1,0 +1,68 @@
+import("//build/config/android/rules.gni")
+
+android_assets("transport_license_assets") {
+  renaming_sources = [ "LICENSE-byeDPI.txt" ]
+  renaming_destinations = [ "licenses/ByeDPI.txt" ]
+}
+
+copy("transport_payload") {
+  sources = [ "libciadpi.so" ]
+  outputs = [ "$root_out_dir/libciadpi.so" ]
+}
+
+source_set("transport") {
+  sources = [ "transport.cc", "transport.h", "dpi_options.h", "dpi_configuration.h" ]
+  public_deps = [ "//base" ]
+  deps = [ ":legacy_data", "//chrome/common" ]
+}
+
+source_set("ui") {
+  sources = [ "internet_browser_ui.cc", "internet_browser_ui.h", "resources.h" ]
+  public_deps = [ "//content/public/browser" ]
+  deps = [
+    ":transport",
+    ":video_player",
+    ":video_library",
+    ":updater",
+    ":legacy_data",
+    "//base",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/bookmarks",
+    "//components/bookmarks/browser",
+    "//content/public/common",
+    "//ui/base:types",
+  ]
+}
+
+source_set("legacy_data") {
+  sources = [ "legacy_data.cc", "legacy_data.h", "video_metadata.h", "legacy_test_paths.h", "video_file_types.h" ]
+  public_deps = [ "//base" ]
+  deps = [ "//net", "//url" ]
+}
+
+source_set("video_player") {
+  sources = [ "video_player.cc", "video_player.h", "video_subtitles.cc", "video_subtitles.h", "video_metadata.h", "resources.h" ]
+  public_deps = [ "//content/public/browser", "//base" ]
+  deps = [ "//base:i18n", "//chrome/common", "//content/public/common", "//net", "//ui/base:types", "//url" ]
+}
+
+source_set("updater") {
+  sources = [ "updater.cc", "updater.h", "update_manifest.h", "update_validation.h", "resources.h" ]
+  public_deps = [ "//base" ]
+  deps = [
+    "//chrome/browser/profiles:profile",
+    "//content/public/browser",
+    "//crypto",
+    "//net",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
+    "//url",
+  ]
+  deps += [ "//chrome/browser/util:jni_headers" ]
+}
+
+source_set("video_library") {
+  sources = [ "video_downloads.cc", "video_downloads.h", "video_file_types.h", "video_metadata.h" ]
+  public_deps = [ "//base" ]
+  deps = [ ":legacy_data", "//components/download/public/common:public", "//content/public/browser", "//net", "//url" ]
+}

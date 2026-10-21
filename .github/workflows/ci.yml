@@ -1,15 +1,45 @@
 name: Browser v0.x CI
 on:
+  workflow_call:
+    inputs:
+      native_windows:
+        type: boolean
+        default: false
+      native_android:
+        type: boolean
+        default: false
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      native_windows:
+        description: Build the v0.2.2 native Chromium Windows development candidate
+        type: boolean
+        default: false
+      native_android:
+        description: Compile Android product objects (no APK or release)
+        type: boolean
+        default: false
 permissions:
   contents: read
+concurrency:
+  group: browser-ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Select one native builder per dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          NATIVE_WINDOWS: ${{ inputs.native_windows }}
+          NATIVE_ANDROID: ${{ inputs.native_android }}
+        run: |
+          if [ "$NATIVE_WINDOWS" = true ] && [ "$NATIVE_ANDROID" = true ]; then
+            echo 'Select only one native platform for this dispatch.'
+            exit 1
+          fi
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.7'
@@ -23,6 +53,22 @@ jobs:
           python3 -m unittest discover -s tool/tests -p 'test_*.py' -v
           python3 tool/release_metadata.py
           python3 tool/configure_android_signing.py
+      - name: Verify compatibility with legacy Android string-list serialization
+        run: |
+          javac -d "$RUNNER_TEMP/legacy-codec-check" native/chromium/android/java/LegacyStringListDecoder.java tool/tests/LegacyStringListDecoderCheck.java
+          java -cp "$RUNNER_TEMP/legacy-codec-check" org.chromium.chrome.browser.LegacyStringListDecoderCheck
+      - name: Verify native DPI preset and custom-option compatibility
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/dpi_options_check.cc -o "$RUNNER_TEMP/dpi-options-check"
+          "$RUNNER_TEMP/dpi-options-check"
+      - name: Verify native update versions and official installer URLs
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/update_validation_check.cc -o "$RUNNER_TEMP/update-validation-check"
+          "$RUNNER_TEMP/update-validation-check"
+      - name: Verify legacy saved-video filename compatibility
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/video_file_types_check.cc -o "$RUNNER_TEMP/video-file-types-check"
+          "$RUNNER_TEMP/video-file-types-check"
       - name: Validate Android manifest XML
         run: python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/AndroidManifest.xml')"
       - run: flutter pub get
@@ -32,6 +78,9 @@ jobs:
       - run: flutter analyze
       - run: flutter test
   android:
+    # The previous Flutter Android product is kept as an explicit legacy
+    # regression build; PRs run light checks during native migration.
+    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows && !inputs.native_android
     runs-on: ubuntu-24.04
     needs: quality
     env:
@@ -60,6 +109,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
   windows:
+    if: github.event_name == 'workflow_dispatch' && !inputs.native_windows && !inputs.native_android
     # Flutter 3.35.x cannot identify Visual Studio 2026 on windows-latest.
     runs-on: windows-2022
     needs: quality
@@ -124,3 +174,58 @@ jobs:
           echo "Source pinned and prototype builder syntax checked."
           echo "Real Chromium engine compilation requires a separate 32GB/120GB runner."
           echo "AdBlock installation and in-app engine remain UNVERIFIED."
+
+  native_windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_windows && !inputs.native_android
+    needs: quality
+    runs-on: [self-hosted, Windows, X64, chromium-windows-v022]
+    concurrency:
+      group: internet-browser-local-native-compile
+      cancel-in-progress: false
+    timeout-minutes: 1440
+    env:
+      NATIVE_WORKSPACE: ${{ vars.CHROMIUM_WINDOWS_WORKSPACE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate native source safeguards
+        shell: cmd
+        run: python -m unittest discover -s tool/tests -p test_windows_chromium.py -v
+      - name: Build Internet Browser from pinned Chromium source
+        id: native_build
+        shell: cmd
+        run: |
+          python -m pip install -r tool/chromium/requirements-windows.txt || exit /b 1
+          if not defined NATIVE_WORKSPACE set "NATIVE_WORKSPACE=%RUNNER_TEMP%\internet-browser-native-win"
+          python tool/chromium/build_windows.py --workspace "%NATIVE_WORKSPACE%" --jobs 3 --stage build/native-windows
+      - name: Prepare an isolated runtime from the exact installer archive
+        id: native_runtime
+        shell: cmd
+        env:
+          NATIVE_EXTRACTOR: ${{ steps.native_build.outputs.extractor }}
+          NATIVE_ACL_SCRIPT: ${{ steps.native_build.outputs.appcontainer_acl_script }}
+          NATIVE_RUNTIME_ROOT: ${{ steps.native_build.outputs.runtime_root }}
+        run: |
+          python tool/chromium/prepare_windows_runtime.py --build build/native-windows --runtime "%NATIVE_RUNTIME_ROOT%\%GITHUB_RUN_ID%-%GITHUB_RUN_ATTEMPT%" --extractor "%NATIVE_EXTRACTOR%" --appcontainer-acl-script "%NATIVE_ACL_SCRIPT%" || exit /b 1
+          copy "%NATIVE_RUNTIME_ROOT%\%GITHUB_RUN_ID%-%GITHUB_RUN_ATTEMPT%\runtime-provenance.json" build\native-windows\runtime-provenance.json
+      - name: Controlled packaged-native fixture and media smoke (not AdBlock acceptance)
+        shell: cmd
+        env:
+          NATIVE_CHROME_EXE: ${{ steps.native_runtime.outputs.chrome_exe }}
+          NATIVE_MEDIA_FIXTURE: ${{ steps.native_build.outputs.media_fixture }}
+        run: python tool/chromium/smoke_windows.py --exe "%NATIVE_CHROME_EXE%" --media-fixture "%NATIVE_MEDIA_FIXTURE%" --report build/native-windows/windows-smoke.json --work build/native-windows-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-v022-development-not-release
+          path: build/native-windows/*
+          if-no-files-found: error
+          retention-days: 14
+
+  native_android:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_android && !inputs.native_windows
+    needs: quality
+    uses: ./.github/workflows/native-android.yml
+    with:
+      phase: product-objects
+      jobs: '2'

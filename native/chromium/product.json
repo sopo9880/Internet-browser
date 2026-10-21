@@ -1,0 +1,13 @@
+{
+  "product_name": "Internet Browser",
+  "product_id": "InternetBrowser",
+  "app_version": "0.2.2",
+  "chromium_version": "155.0.8059.84",
+  "chromium_revision": "5869fe313571d75152b77813cf0a4ee26a4e6df0",
+  "chromium_repository": "https://chromium.googlesource.com/chromium/src.git",
+  "depot_tools_revision": "3a8af1e64be01a524f7d1c46daf8c2dcac63ff85",
+  "depot_tools_repository": "https://chromium.googlesource.com/chromium/tools/depot_tools.git",
+  "windows_runner_label": "chromium-windows-v022",
+  "android_runner_label": "chromium-wsl2",
+  "required_adblock_id": "gighmmpiobklfepjocnamgkkbiglidom"
+}

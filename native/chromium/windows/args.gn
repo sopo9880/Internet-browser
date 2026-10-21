@@ -1,0 +1,15 @@
+# Native Chromium browser, including its real extension toolbar and popup UI.
+target_os = "win"
+target_cpu = "x64"
+is_debug = false
+is_component_build = false
+is_chrome_branded = false
+# Keep a local, reproducible build; do not require Google's internal services.
+is_official_build = false
+use_remoteexec = false
+chrome_pgo_phase = 0
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"

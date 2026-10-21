@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^http://127\\.0\\.0\\.1:[0-9]+/tracker\\.js$",
+      "resourceTypes": ["script"]
+    }
+  }
+]
