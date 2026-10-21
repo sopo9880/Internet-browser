@@ -72,13 +72,15 @@ resource checks produced identical full-file and wrapped-message mappings for
 
 These are source checks. They do not establish successful Android compilation,
 ByeDPI/media/data integration, a physical device's security verdict, or release
-readiness. The complete Android product build orchestration is still pending.
+readiness. Full APK orchestration is implemented below; the APK phase has not
+yet run.
 
 The Android overlay now connects the native hub and browser-owned transport to
 startup. Its ARM64 ByeDPI executable is built with Chromium's pinned NDK 30,
 packaged in nativeLibraryDir, and includes its MIT license. A parent-death signal
-limits the child lifetime to the browser. These Android C++ paths still require
-compilation and runtime validation.
+limits the child lifetime to the browser. All seven Android product objects,
+including transport and the updated player, compiled at 356948f. Android runtime
+and device validation remain outstanding.
 
 Original Flutter preferences are read into an atomic snapshot without editing
 the original XML. Legacy ArrayList and Arrays-backed string lists are decoded
@@ -170,7 +172,7 @@ No installer was downloaded/executed by the renderer-flow tests.
 It validates the source/driver/nested repository pins, reviewed patch bytes,
 owned overlay hashes and unknown tracked edits before replacing only the recorded
 product overlay. It rebuilds the pinned transport, regenerates GN, compiles the
-six product translation units first, then builds `chrome_public_apk`. Final APK
+seven product translation units first, then builds `chrome_public_apk`. Final APK
 checks cover package/version, the exact transport/license payload, ARM64 engine
 ELF and disposable signature. Provenance and source-phase records accompany the
 staged APK; they explicitly retain false runtime/release/production-signing flags.
@@ -270,8 +272,9 @@ signatures and selected enabled vendor ruleset
 `8C13E995-8F06-4927-BEA7-6C845FB7EEBF`, block rule 779252 (`/ads/!rotator/`).
 Its loopback server serves both a control script and a matching request; it adds
 no filtering rules or substitute extension. Server/selection tests passed, but
-store installation, real worker/DNR, popup, enable/disable, update/removal,
-restart persistence and ByeDPI operation remain unverified.
+these preparation tests do not establish runtime behavior. Subsequent real
+Windows extension results are recorded below. Extension-manager enable/disable,
+update/removal and error recovery still require separate acceptance.
 
 Windows CI now prepares its test runtime from the exact `chrome.7z` whose hash
 matches native build provenance. The helper rejects escaping/linked/colliding
@@ -295,15 +298,41 @@ is parsed, without waiting for the media resource's delayed window-load event.
 Run 39524456961 successfully exercised all 22 controlled runtime checks,
 including saved external Korean subtitles, legacy resume, position saving,
 reopening, completed-download listing/playback and unchanged original files.
-Genuine AdBlock installation/native popup and OS installer execution remain
-unverified. Separately, the exact 0f10c4f packaged app with ByeDPI enabled loaded
+Separately, the exact 0f10c4f packaged app with ByeDPI enabled loaded
 https://example.com/; its network log records the example.com:443 HTTP/2 session
 through the app-owned loopback SOCKS5 endpoint. The bundled transport hash matches
 build provenance and no transport child remained after browser exit. This proves
-that tested HTTPS route, not restricted-site bypass or AdBlock coexistence.
-Android's seven ARM64 product objects compiled at 0f5a987 after replacing a
-Windows-only process-status call with POSIX termination-status handling. This
+that tested HTTPS route, not restricted-site bypass. Android's seven ARM64
+product objects compiled again at 356948f, including the DOM-ready player fix,
+after the earlier Windows-only process-status API was replaced with POSIX
+termination-status handling. This
 does not constitute a complete APK build or device validation.
+
+On 2026-10-21 the user installed the real AdBlock 6.50.0 into the owned native
+test profile through the Chrome Web Store. The profile recorded `from_webstore`
+and the expected ID, and the real MV3 worker executed. Read-only diagnostics
+observed the vendor's enabled ruleset 2708BCB7-2E45-41BC-B517-1730CF532F89, rule
+369368 (`/ads/!rotator/`). Its installed rule-file bytes matched the authentic
+developer/publisher-verified CRX; no custom rules were added. The control script
+reached the loopback server while the matching ad request did not. The user
+opened the toolbar popup and `chrome.runtime.getContexts` reported its actual
+`POPUP` context, rather than merely loading a popup HTML document in a tab.
+
+Human-driven site pause/re-enable produced ad-loaded true, then false, with
+matching server request counts. After the user closed the app, the same profile
+was restarted headlessly using the b678e101 packaged runtime with ByeDPI enabled.
+The normally installed extension remained enabled and blocked the controlled
+request. The same browser loaded example.com over an HTTP/2 session through the
+app-owned SOCKS endpoint. This proves the observed coexistence and restart case;
+it does not prove a restricted site's bypass or Android behavior.
+
+The user also ran the b678e101 Windows mini-installer. The installed application
+ran from LocalAppData/Internet Browser/Application and registered as Internet
+Browser. All 258 installed payload files matched the exact tested archive;
+none were missing or different. Windows installation metadata retains the
+Chromium engine version 155.0.8059.84, separate from product version 0.2.2.
+Native first-run visual review was stopped when the computer-use helper could
+not confidently identify the current URL. No safety barrier was bypassed.
 
 The local player now reads the legacy `subtitlePath` first, then adjacent
 same-basename SRT/VTT/ASS files, on a worker. Reads are limited to 2 MiB local
@@ -319,18 +348,17 @@ ASS fonts, positioning and effects are not reproduced. Twenty real Chrome 155
 renderer checks pass, including Korean text, literal markup, cue timing,
 SRT/VTT/ASS loading and track toggling; the screenshot was visually inspected.
 All seven current Windows translation units pass the pinned compiler's syntax
-check. These are not native product or device acceptance. The native executable
-smoke now checks a saved UTF-16 subtitle path taking priority over a neighboring
-SRT and verifies its original bytes remain unchanged; that test is pending.
+check. The packaged native smoke additionally passed the saved UTF-16 subtitle
+path priority over a neighboring SRT and unchanged-original-bytes checks.
+Android device acceptance is separate.
 
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;
 a compiled browser is not functional acceptance. Remaining work includes:
 
-- Native Windows compile/startup, first-run/home integration and installer.
-- Real AdBlock store install, MV3, DNR, toolbar popup, enable/disable, removal,
-  updates, restart persistence and operation with ByeDPI.
+- Installed Windows first-run/home visual review and old-to-native update flow.
+- Real AdBlock extension-manager enable/disable, removal/update and error recovery.
 - Preserve/import old bookmarks, history, settings and media. Complete media
   download/library/player and updater integration without deleting old profiles.
 - Finish English/localized branding and artwork on both platforms. Retain
