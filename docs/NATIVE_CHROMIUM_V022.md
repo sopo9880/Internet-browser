@@ -289,9 +289,18 @@ The Windows browser and mini-installer compiled successfully at 9e878393.
 Local packaged-runtime checks now pass startup, product WebUI, video title
 editing, legacy bookmark import/deduplication, upstream notices, fixture MV3/DNR,
 controlled navigation/download and fixture popup document. The saved-video
-player check still fails: the local media document reaches readyState 4 but the
-custom player is absent. This blocks a successful full runtime report. Genuine
-AdBlock installation/native popup and OS installer execution remain unverified.
+player initially failed: the media document reached readyState 4 but the
+custom player was absent. At b678e101 the player attaches when the media document
+is parsed, without waiting for the media resource's delayed window-load event.
+Run 39524456961 successfully exercised all 22 controlled runtime checks,
+including saved external Korean subtitles, legacy resume, position saving,
+reopening, completed-download listing/playback and unchanged original files.
+Genuine AdBlock installation/native popup and OS installer execution remain
+unverified. Separately, the exact 0f10c4f packaged app with ByeDPI enabled loaded
+https://example.com/; its network log records the example.com:443 HTTP/2 session
+through the app-owned loopback SOCKS5 endpoint. The bundled transport hash matches
+build provenance and no transport child remained after browser exit. This proves
+that tested HTTPS route, not restricted-site bypass or AdBlock coexistence.
 Android's seven ARM64 product objects compiled at 0f5a987 after replacing a
 Windows-only process-status call with POSIX termination-status handling. This
 does not constitute a complete APK build or device validation.
