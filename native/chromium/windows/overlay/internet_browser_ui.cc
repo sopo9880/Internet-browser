@@ -343,3 +343,13 @@ InternetBrowserUI::InternetBrowserUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(std::make_unique<InternetBrowserHandler>());
 }
 InternetBrowserUI::~InternetBrowserUI() = default;
+
+InternetBrowserTransmuxUI::InternetBrowserTransmuxUI(content::WebUI* web_ui)
+    : content::WebUIController(web_ui) {
+  auto* source = content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui), "internet-browser-transmux");
+  source->SetRequestFilter(base::BindRepeating([](const std::string&) { return true; }),
+      base::BindRepeating([](const std::string&, content::WebUIDataSource::GotDataCallback reply) {
+        std::move(reply).Run(base::MakeRefCounted<base::RefCountedString>(
+            "<!doctype html><meta charset=utf-8><title>영상 처리</title>"));
+      }));
+}

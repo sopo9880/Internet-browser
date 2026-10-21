@@ -45,7 +45,12 @@ VIDEO_CAPTURE_CHECKS = {'capture_screen_and_quality_options', 'native_capture_do
     'dash_segment_list_and_timeline_resolved', 'dash_numbered_template_resolved',
     'dash_tracks_exact_original_bytes', 'dash_library_includes_companion_audio',
     'dash_video_and_audio_play_together', 'dash_seek_rate_and_volume_synchronized',
-    'dash_pause_stops_audio', 'dash_pair_survives_browser_restart'}
+    'dash_pause_stops_audio', 'dash_pair_survives_browser_restart',
+    'hls_transport_stream_resolved', 'transport_stream_saved_as_mp4',
+    'transport_mp4_video_and_audio_decoded', 'direct_transport_stream_converted',
+    'invalid_transport_stream_not_registered', 'transport_processing_origin_isolated',
+    'transmux_processor_released', 'active_transmux_browser_shutdown',
+    'active_transmux_partial_cleanup'}
 
 
 def require(condition: bool, message: str) -> None:

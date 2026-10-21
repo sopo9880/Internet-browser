@@ -88,5 +88,17 @@
       "windows",
       "android"
     ]
+  },
+  {
+    "project": "mux.js (Brightcove)",
+    "file": "muxjs-LICENSE.Apache-2.0.txt",
+    "sha256": "1a3c5bb355ae9ea7f0e8e92836b72189c7acf85a487dd8706d5f1dfff9bf7d3d",
+    "revision": "e1b4d161f51782e4712d020b66d5087bd6febb3d",
+    "source_path": "LICENSE",
+    "repository": "https://github.com/videojs/mux.js",
+    "platforms": [
+      "windows",
+      "android"
+    ]
   }
 ]

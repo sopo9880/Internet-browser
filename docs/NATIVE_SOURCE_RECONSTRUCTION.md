@@ -67,6 +67,16 @@ The native Android transport is built from the pinned ByeDPI source, rather
 than reusing an ordinary Linux executable. Original upstream notices remain
 unchanged.
 
+The MPEG-TS media helper is built from the unmodified 24-file mux.js source
+closure in `third_party/muxjs`, pinned to GitHub commit
+`e1b4d161f51782e4712d020b66d5087bd6febb3d` (v7.1.0). Its provenance records the
+verified npm SHA-512 archive and per-file SHA-256 hashes, independently compared
+with that GitHub commit. `tool/chromium/video_transmuxer.py` verifies and bundles
+those sources deterministically without installing packages. The source closure,
+Apache-2.0 license and original copyright statements are included in this
+integration repository; its license is also embedded in the app and staged with
+the other unchanged upstream notices.
+
 ## Distribution work still required
 
 The upstream notice files and immutable reconstruction references accompany the

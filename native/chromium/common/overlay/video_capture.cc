@@ -33,8 +33,14 @@ bool Remote(const GURL& url) {
   return url.is_valid() && url.SchemeIsHTTPOrHTTPS() && !url.has_username() && !url.has_password();
 }
 }
-VideoCapture::VideoCapture(Profile* profile) : profile_(profile) {}
+VideoCapture::VideoCapture(Profile* profile) : profile_(profile) { profile_observation_.Observe(profile); }
 VideoCapture::~VideoCapture() = default;
+void VideoCapture::OnProfileWillBeDestroyed(Profile*) {
+  scan_factory_.InvalidateWeakPtrs(); weak_factory_.InvalidateWeakPtrs();
+  scan_reply_.Reset(); candidates_.clear();
+  for (const auto& stream : streams_) stream->Shutdown();
+  streams_.clear(); profile_observation_.Reset();
+}
 VideoCapture* VideoCapture::Get(Profile* profile) {
   static constexpr char key[] = "internet-browser-video-capture";
   auto* value = static_cast<VideoCapture*>(profile->GetUserData(key));
@@ -90,17 +96,22 @@ void VideoCapture::Scanned(content::WeakDocumentPtr document, base::Value value)
             (*kind != "file" && *kind != "hls" && *kind != "dash" && *kind != "pair")) continue;
         auto row = item->Clone();
         std::vector<GURL> video_parts, audio_parts;
+        const auto* mime = item->FindString("mime");
+        const auto source_path = base::ToLowerASCII(GURL(*address).path());
+        const bool transport = *kind == "file" && (source_path.ends_with(".ts") || source_path.ends_with(".m2ts") || (mime && *mime == "video/mp2t"));
         if (*kind == "pair") {
           const auto* audio = item->FindString("audioUrl");
           if (!audio || audio->size() > 16384 || !Remote(GURL(*audio))) continue;
           video_parts.emplace_back(*address); audio_parts.emplace_back(*audio);
           row.Set("kind", "stream"); row.Set("paired", true);
+        } else if (transport) {
+          video_parts.emplace_back(*address); row.Set("kind", "stream"); row.Set("convertedFromTs", true);
         }
         row.Set("title", NormalizeVideoTitle(item->FindString("title") ? *item->FindString("title") : "영상"));
         row.Set("page", content::WebContents::FromRenderFrameHost(frame)->GetLastCommittedURL().spec());
         const auto token = base::UnguessableToken::Create().ToString();
         row.Set("token", token);
-        candidates_.emplace(token, Candidate{document, frame->GetLastCommittedURL().GetWithoutRef(), row.Clone(), std::move(video_parts), std::move(audio_parts)});
+        candidates_.emplace(token, Candidate{document, frame->GetLastCommittedURL().GetWithoutRef(), row.Clone(), std::move(video_parts), std::move(audio_parts), transport});
         found_.Append(std::move(row));
       }
     }
@@ -142,7 +153,7 @@ void VideoCapture::Download(const std::string& token, Reply reply) {
     }
     auto job = std::make_unique<VideoStream>(profile_, candidate.document, *candidate.data.FindString("title"), *candidate.data.FindString("page"));
     auto* pointer = job.get(); streams_.push_back(std::move(job));
-    pointer->Start(candidate.parts, std::move(reply), candidate.audio_parts); return;
+    pointer->Start(candidate.parts, std::move(reply), candidate.audio_parts, candidate.transport_stream); return;
   }
   if (*candidate.data.FindString("kind") != "file") {
     std::move(reply).Run(Error("먼저 스트림 확인을 눌러 저장 가능한 화질을 선택해 주세요.")); return;
@@ -257,7 +268,9 @@ void VideoCapture::Inspected(std::string token, Reply reply, base::DictValue res
     }
     auto row = original.Clone(); const auto id = base::UnguessableToken::Create().ToString();
     row.Set("token", id); row.Set("kind", "stream");
-    candidates_.emplace(id, Candidate{document, source_url, row.Clone(), std::move(addresses)}); rows.Append(std::move(row));
+    const bool transport = result.FindBool("transportStream").value_or(false);
+    row.Set("convertedFromTs", transport);
+    candidates_.emplace(id, Candidate{document, source_url, row.Clone(), std::move(addresses), {}, transport}); rows.Append(std::move(row));
   }
   base::DictValue response; response.Set("items", std::move(rows)); std::move(reply).Run(std::move(response));
 }

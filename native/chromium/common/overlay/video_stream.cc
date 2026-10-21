@@ -5,25 +5,34 @@
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
+#include "base/base64.h"
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/task/thread_pool.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
+#include "base/threading/platform_thread.h"
 #include "base/unguessable_token.h"
 #include "chrome/browser/internet_browser/video_playlist.h"
 #include "chrome/browser/internet_browser/video_dash.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
+#include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_isolated_world_ids.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/common/referrer.h"
+#include "ui/base/page_transition_types.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/data_decoder/public/cpp/data_decoder.h"
 
 namespace internet_browser {
 namespace {
+constexpr char kProcessorUrl[] = "chrome://internet-browser-transmux/";
 constexpr auto kTraffic = net::DefineNetworkTrafficAnnotation("internet_browser_video_stream", R"(
  semantics {
    sender: "Internet Browser video stream saver"
@@ -96,6 +105,21 @@ bool AppendPart(base::FilePath part, base::FilePath output, bool first) {
   destination.Close();
   return flushed && base::DeleteFile(part);
 }
+std::string ReadTransportPart(base::FilePath path) {
+  std::string bytes;
+  if (!base::ReadFileToStringWithMaxSize(path, &bytes, 8 * 1024 * 1024) || bytes.size() < 188) return {};
+  return base::Base64Encode(bytes);
+}
+bool SaveTransmuxed(base::FilePath original, base::FilePath output, bool first, std::string encoded) {
+  std::string bytes;
+  if (encoded.size() > 24 * 1024 * 1024 || !base::Base64Decode(encoded, &bytes) || bytes.size() > 16 * 1024 * 1024) return false;
+  const auto converted = original.AddExtensionASCII("converted.mp4");
+  {
+    base::File file(converted, base::File::FLAG_CREATE | base::File::FLAG_WRITE);
+    if (!file.IsValid() || !file.WriteAtCurrentPosAndCheck(base::as_byte_span(bytes)) || !file.Flush()) return false;
+  }
+  return base::DeleteFile(original) && AppendPart(converted, output, first);
+}
 bool Finalize(base::FilePath directory, std::string title, std::string page, bool audio) {
   const auto file = directory.AppendASCII("video.mp4");
   const auto partial = directory.AppendASCII("video.part");
@@ -112,11 +136,20 @@ void ForgetDownload(Profile* profile, download::DownloadItem* item, bool cancel)
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
       base::BindOnce([](base::WeakPtr<Profile> profile, std::string guid, bool cancel) {
         if (!profile) return;
-        auto* item = profile->GetDownloadManager()->GetDownloadByGuid(guid);
+        auto* manager = profile->GetDownloadManager(); if (!manager) return;
+        auto* item = manager->GetDownloadByGuid(guid);
         if (!item) return;
         if (cancel) item->Cancel(false);
         item->Remove();
       }, profile->GetWeakPtr(), item->GetGuid(), cancel));
+}
+void DeletePartialDirectory(base::FilePath path) {
+  // Windows may briefly retain a download handle on its separate file runner.
+  // Retry only this job's owned directory, without blocking the UI thread.
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    if (base::DeletePathRecursively(path)) return;
+    base::PlatformThread::Sleep(base::Milliseconds(100));
+  }
 }
 }
 VideoStream::VideoStream(Profile* profile, content::WeakDocumentPtr document, std::string title, std::string page)
@@ -127,8 +160,22 @@ VideoStream::VideoStream(Profile* profile, content::WeakDocumentPtr document, st
   if (auto* frame = document_.AsRenderFrameHostIfValid()) source_url_ = frame->GetLastCommittedURL().GetWithoutRef();
 }
 VideoStream::~VideoStream() {
+  weak_factory_.InvalidateWeakPtrs();
+  ReleaseProcessor();
   if (observation_.IsObserving()) { auto* item = observation_.GetSource(); observation_.Reset(); ForgetDownload(profile_, item, true); }
-  if (state_ != 1) Cleanup();
+  if (!shutting_down_ && state_ != 1) Cleanup();
+}
+void VideoStream::Shutdown() {
+  shutting_down_ = true; weak_factory_.InvalidateWeakPtrs(); ReleaseProcessor();
+  // Profile shutdown can happen after the UI run loop stops. There is no
+  // observer notification on this stack, so cancellation must be synchronous.
+  if (observation_.IsObserving()) {
+    auto* item = observation_.GetSource(); observation_.Reset(); item->Cancel(false); item->Remove();
+  }
+  if (state_ != 1 || inspect_) {
+    if (state_ != 1) state_ = 2;
+    worker_->PostTask(FROM_HERE, base::BindOnce(&DeletePartialDirectory, directory_));
+  }
 }
 void VideoStream::Inspect(GURL manifest, Reply reply, bool dash) {
   inspect_ = true; dash_ = dash;
@@ -140,7 +187,8 @@ void VideoStream::Inspect(GURL manifest, Reply reply, bool dash) {
       base::BindOnce(&Directory, directory_), base::BindOnce(&VideoStream::DirectoryReady,
       weak_factory_.GetWeakPtr(), true, std::move(manifest), std::move(reply)));
 }
-void VideoStream::Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts) {
+void VideoStream::Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts, bool transport_stream) {
+  transport_stream_ = transport_stream;
   parts_ = std::move(parts);
   audio_start_ = parts_.size();
   for (auto& url : audio_parts) parts_.push_back(std::move(url));
@@ -182,9 +230,12 @@ void VideoStream::Started(download::DownloadItem* item, download::DownloadInterr
   OnDownloadUpdated(item);
 }
 void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
-  if (item->IsDangerous() || item->IsInsecure() || item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
+  if (item->IsDangerous() || item->IsInsecure()) {
+    Fail("브라우저의 안전 검사로 영상 저장을 중단했습니다."); return;
+  }
+  if (item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : transport_stream_ ? 8LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
       received_ + item->GetReceivedBytes() > 8.0 * 1024 * 1024 * 1024) {
-    Fail("안전 검사 또는 구간 크기 제한으로 영상 저장을 중단했습니다."); return;
+    Fail(inspect_ ? "재생 목록이 2 MB 제한을 초과했습니다." : transport_stream_ ? "MPEG-TS 구간이 현재 변환 제한인 8 MB를 초과했습니다." : "영상·음성의 합계가 현재 저장 제한인 8 GB를 초과했습니다."); return;
   }
   if (item->GetState() == download::DownloadItem::COMPLETE) {
     const auto path = item->GetTargetFilePath(); const auto url = item->GetURL();
@@ -203,20 +254,86 @@ void VideoStream::OnDownloadDestroyed(download::DownloadItem* item) {
   observation_.Reset(); Fail("영상 다운로드가 종료되었습니다.");
 }
 void VideoStream::PartReady(base::FilePath path, GURL final_url) {
-  if (state_ != 0) return;
+  if (state_ != 0) { waiting_ = false; if (state_ != 1) Cleanup(); return; }
   if (path.DirName() != directory_) { waiting_ = false; Fail("영상 구간 저장 경로가 일치하지 않습니다."); return; }
   if (inspect_) {
     worker_->PostTaskAndReplyWithResult(FROM_HERE,
         base::BindOnce([](base::FilePath path) { std::string text; base::ReadFileToStringWithMaxSize(path, &text, 2 * 1024 * 1024); return text; }, path),
         base::BindOnce(&VideoStream::Inspected, weak_factory_.GetWeakPtr(), final_url));
+  } else if (transport_stream_) {
+    worker_->PostTaskAndReplyWithResult(FROM_HERE,
+        base::BindOnce(&ReadTransportPart, path),
+        base::BindOnce(&VideoStream::TransmuxInput, weak_factory_.GetWeakPtr(), path));
   } else {
     worker_->PostTaskAndReplyWithResult(FROM_HERE,
         base::BindOnce(&AppendPart, path, directory_.AppendASCII(completed_ >= audio_start_ ? "audio.part" : "video.part"), completed_ == 0 || completed_ == audio_start_),
         base::BindOnce(&VideoStream::Appended, weak_factory_.GetWeakPtr()));
   }
 }
+void VideoStream::TransmuxInput(base::FilePath path, std::string encoded) {
+  if (state_ != 0) { waiting_ = false; if (state_ != 1) Cleanup(); return; }
+  auto* source = document_.AsRenderFrameHostIfValid();
+  if (encoded.empty() || !source || !source->IsActive() || !source->IsRenderFrameLive() ||
+      source->GetLastCommittedURL().GetWithoutRef() != source_url_) {
+    waiting_ = false; Fail("영상 구간을 변환하지 못했습니다. 원본 탭과 구간 크기(8 MB 이하)를 확인해 주세요."); return;
+  }
+  const auto generation = ++transmux_generation_;
+  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+      base::BindOnce([](base::WeakPtr<VideoStream> job, size_t generation) {
+        if (!job || job->transmux_generation_ != generation) return;
+        job->waiting_ = false;
+        if (job->state_ == 0) job->Fail("영상 구간 변환 시간이 초과되었습니다. 원본 탭을 새로고침한 뒤 다시 시도해 주세요.");
+        else job->Cleanup();
+      }, weak_factory_.GetWeakPtr(), generation), base::Seconds(30));
+  if (!processor_) {
+    pending_transmux_path_ = path; pending_transmux_data_ = std::move(encoded);
+    content::WebContents::CreateParams params(profile_);
+    params.initially_hidden = true; params.is_never_composited = true;
+    processor_ = content::WebContents::Create(params); Observe(processor_.get());
+    processor_->GetController().LoadURL(GURL(kProcessorUrl), content::Referrer(), ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
+    return;
+  }
+  auto* frame = processor_->GetPrimaryMainFrame();
+  if (!frame || !frame->IsActive() || !frame->IsRenderFrameLive() || frame->GetLastCommittedURL() != GURL(kProcessorUrl) ||
+      frame->GetProcess() == source->GetProcess()) {
+    waiting_ = false; Fail("영상 변환 작업 공간을 준비하지 못했습니다."); return;
+  }
+  processor_isolated_ = true;
+  base::DictValue request; request.Set("id", id_); request.Set("data", std::move(encoded));
+  request.Set("first", completed_ == 0); request.Set("last", completed_ + 1 == parts_.size());
+  std::string json; base::JSONWriter::Write(request, &json);
+  const std::string script = "(() => {const request=" + json + "; const create=" +
+      (completed_ == 0 ? std::string(kTransmuxerFactoryJs) : "null") + ";\n" + kVideoTransmuxerJs + "\n})()";
+  frame->ExecuteJavaScriptInIsolatedWorld(base::UTF8ToUTF16(script),
+      base::BindOnce(&VideoStream::Transmuxed, weak_factory_.GetWeakPtr(), path), ISOLATED_WORLD_ID_CHROME_INTERNAL);
+}
+void VideoStream::DOMContentLoaded(content::RenderFrameHost* frame) {
+  if (!processor_ || frame != processor_->GetPrimaryMainFrame() || frame->GetLastCommittedURL() != GURL(kProcessorUrl) || pending_transmux_path_.empty()) return;
+  auto path = std::move(pending_transmux_path_); pending_transmux_path_.clear();
+  auto data = std::move(pending_transmux_data_);
+  // Allow the observer notification to unwind before a failure can destroy
+  // this private WebContents.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
+      base::BindOnce(&VideoStream::TransmuxInput, weak_factory_.GetWeakPtr(), path, std::move(data)));
+}
+void VideoStream::ReleaseProcessor() {
+  Observe(nullptr); processor_.reset(); pending_transmux_path_.clear(); pending_transmux_data_.clear();
+}
+void VideoStream::Transmuxed(base::FilePath path, base::Value result) {
+  ++transmux_generation_;
+  if (state_ != 0) { waiting_ = false; if (state_ != 1) Cleanup(); return; }
+  const auto* data = result.GetIfDict();
+  const auto* encoded = data ? data->FindString("data") : nullptr;
+  if (!data || !data->FindBool("ok").value_or(false) || !encoded || encoded->size() > 24 * 1024 * 1024) {
+    waiting_ = false; Fail("이 MPEG-TS 구간의 코덱 또는 형식을 MP4로 변환할 수 없습니다."); return;
+  }
+  worker_->PostTaskAndReplyWithResult(FROM_HERE, base::BindOnce(&SaveTransmuxed, path,
+      directory_.AppendASCII("video.part"), completed_ == 0, *encoded),
+      base::BindOnce(&VideoStream::Appended, weak_factory_.GetWeakPtr()));
+}
 void VideoStream::Inspected(GURL final_url, std::string body) {
   waiting_ = false;
+  if (state_ != 0) { if (state_ != 1) Cleanup(); return; }
   if (!base::IsStringUTF8(body)) { Fail("올바른 UTF-8 스트림 재생 목록이 아닙니다."); return; }
   if (dash_) {
     if (body.find("<!DOCTYPE") != std::string::npos || body.find("<!ENTITY") != std::string::npos) {
@@ -238,9 +355,7 @@ void VideoStream::Inspected(GURL final_url, std::string body) {
   for (const auto& item : playlist.variants) {
     base::DictValue row; row.Set("url", final_url.Resolve(item.address).spec()); row.Set("quality", item.quality); variants.Append(std::move(row));
   }
-  if (playlist.variants.empty() && playlist.extension != ".mp4") {
-    Fail("이 HLS 영상은 MPEG-TS 변환이 필요합니다. 현재는 MP4 구간으로 구성된 HLS 영상만 저장할 수 있습니다."); return;
-  }
+  result.Set("transportStream", playlist.variants.empty() && playlist.extension == ".ts");
   size_t address_bytes = 0;
   for (const auto& item : playlist.parts) {
     const auto address = final_url.Resolve(item.address).spec();
@@ -281,10 +396,12 @@ void VideoStream::Finalized(bool success) {
   if (state_ != 0) { Cleanup(); return; }
   if (!success) { Fail("완성된 영상을 서재에 등록하지 못했습니다."); return; }
   state_ = 1; paused_ = false;
+  ReleaseProcessor();
 }
 base::DictValue VideoStream::Status() const {
   auto result = base::DictValue(); result.Set("guid", id_); result.Set("name", title_);
   result.Set("inspection", inspect_);
+  result.Set("isolatedProcessor", processor_isolated_);
   result.Set("state", state_); result.Set("paused", paused_); result.Set("blocked", false);
   result.Set("canResume", state_ == 0 && paused_); result.Set("stream", true);
   result.Set("pausing", paused_ && (observation_.IsObserving() || waiting_));
@@ -312,19 +429,21 @@ bool VideoStream::Control(const std::string& action) {
 void VideoStream::Fail(const char* error) {
   if (state_ != 2) state_ = 3;
   error_ = error; paused_ = false;
+  ReleaseProcessor();
   if (observation_.IsObserving()) { auto* item = observation_.GetSource(); observation_.Reset(); ForgetDownload(profile_, item, true); }
   if (reply_) { base::DictValue result; result.Set("error", error_); std::move(reply_).Run(std::move(result)); }
   if (!waiting_) Cleanup();
 }
 void VideoStream::Cleanup() {
   if (directory_.empty()) return;
+  ReleaseProcessor();
   auto directory = directory_;
   // Queue behind any UI-thread download cancellation/removal, then serialize
   // deletion behind this job's outstanding file operations.
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
       base::BindOnce([](scoped_refptr<base::SequencedTaskRunner> worker, base::FilePath directory) {
         worker->PostTask(FROM_HERE,
-            base::BindOnce([](base::FilePath path) { base::DeletePathRecursively(path); }, directory));
+            base::BindOnce(&DeletePartialDirectory, directory));
       }, worker_, directory));
 }
 }

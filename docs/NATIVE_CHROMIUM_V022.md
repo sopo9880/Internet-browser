@@ -393,24 +393,40 @@ Video and audio retain their original bytes as a library pair. The player keeps
 play/pause, seeking, rate and volume together, and the pair survives a browser
 restart. This is not a single muxed MP4 export; the UI states that limitation.
 
-The controlled native browser test passed 34 checks covering the actual save screen and
+Unencrypted H.264/AAC MPEG-TS HLS segments and direct TS clips (up to 8 MiB per
+input segment/clip) can be transmuxed to MP4 without re-encoding. The pinned
+mux.js 7.1.0 source closure is vendored unchanged with SHA-256 hashes, verified
+against its npm SHA-512 archive and GitHub commit
+`e1b4d161f51782e4712d020b66d5087bd6febb3d`. Apache-2.0 text and original Brightcove
+attribution are retained. The deterministic in-app loader needs no npm packages
+or runtime network code. Processing runs in a private, never-composited
+`chrome://internet-browser-transmux/` WebContents with no native message handlers;
+the original site's renderer does not receive the processing bytes. The runtime
+checks the distinct renderer process and expected internal origin. Input/output
+sizes, processing time and codec/configuration changes are bounded. Profile
+shutdown destroys that context and cleans incomplete files on its sequenced
+worker, including when the UI loop has already stopped.
+
+The controlled native browser test passed 43 checks covering the actual save screen and
 quality choices, byte-identical file download, generic/YouTube/Instagram data
 discovery, profile separation, encrypted HLS refusal, HLS variant selection,
 pause/resume/cancel, hub-navigation survival, exact MP4 assembly, cleanup, library
 registration, offline playback and rejection of stale documents/SPA URLs. It also
 checks adaptive MP4 pairs, DASH XML/template resolution, original video/audio
-bytes, synchronized playback/controls and durable pairs across browser restart. This
+bytes, synchronized playback/controls and durable pairs across browser restart.
+It also verifies TS-to-MP4 conversion, real 720p video/AAC decoding, isolated
+processing, malformed-input rejection and active-job shutdown/partial cleanup. This
 is controlled-page evidence, **not live YouTube/Instagram compatibility evidence**.
 The JavaScript discovery suite has 9 checks; release staging additionally requires
 the full native video smoke and its exact engine DLL hash.
 The updated Windows source browser also passed all 22 existing native smoke
 checks, retaining bookmark import, extension fixture behavior, subtitles,
-playback/resume and unchanged legacy data. The 115 Python tests passed with 3
+playback/resume and unchanged legacy data. The 117 Python tests passed with 3
 environment-specific skips; HLS C++ parser checks and workflow lint passed.
 
 Still required for the requested broader downloader: live site acceptance,
-YouTube signature-dependent formats, single-file audio/video export,
-MPEG-TS remuxing, additional playlist features and live streams. These
+YouTube signature-dependent formats, single-file export of separate tracks,
+larger TS segments, additional codecs/playlist features and live streams. These
 cases display explicit reasons instead of pretending a playlist or video-only
 track is a completed offline movie. DRM decryption is not implemented. The
 installed development app and previous installer do not contain these changes.

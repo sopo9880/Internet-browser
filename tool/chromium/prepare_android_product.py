@@ -158,7 +158,8 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
             '#include "chrome/browser/internet_browser/internet_browser_ui.h"\n')
         return replace_once(text, '  auto& map = content::WebUIConfigMap::GetInstance();',
             '  auto& map = content::WebUIConfigMap::GetInstance();\n'
-            '  map.AddWebUIConfig(std::make_unique<InternetBrowserUIConfig>());')
+            '  map.AddWebUIConfig(std::make_unique<InternetBrowserUIConfig>());\n'
+            '  map.AddWebUIConfig(std::make_unique<InternetBrowserTransmuxUIConfig>());')
     update('chrome/browser/ui/webui/chrome_web_ui_configs.cc', configs)
     def config_build(text):
         prefix, rest = text.split('source_set("configs") {', 1)

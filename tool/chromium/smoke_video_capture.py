@@ -36,6 +36,7 @@ def server(media: Path):
     chunks = {'/init.mp4': video[:boundaries[0]], '/one.m4s': video[boundaries[0]:boundaries[1]], '/two.m4s': video[boundaries[1]:]}
     dash_video = (media/'bear-640x360-v_frag.mp4').read_bytes()
     dash_audio = (media/'bear-640x360-a_frag.mp4').read_bytes()
+    transport = (media/'bear-1280x720-hls.ts').read_bytes()
     def split_track(data):
         offset = 0
         while offset + 8 <= len(data):
@@ -63,6 +64,8 @@ def server(media: Path):
             mime = 'text/html; charset=utf-8'
             body = b''
             if route in chunks: body, mime = chunks[route], 'video/mp4'
+            elif route in ['/clip.ts','/slow-second.ts']: body, mime = transport, 'video/mp2t'
+            elif route == '/bad.ts': body, mime = b'not-a-transport-stream'*100, 'video/mp2t'
             elif route.endswith('.webm'): body, mime = webm, 'video/webm'
             elif route.endswith('.mp4'): body, mime = video, 'video/mp4'
             elif route == '/master.m3u8':
@@ -71,6 +74,10 @@ def server(media: Path):
             elif route == '/vod.m3u8':
                 body = b'#EXTM3U\n#EXT-X-TARGETDURATION:5\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:1,\none.m4s\n#EXTINF:2,\ntwo.m4s\n#EXT-X-ENDLIST\n'
                 mime = 'application/vnd.apple.mpegurl'
+            elif route == '/ts.m3u8':
+                body = b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:2.76,\nclip.ts\n#EXT-X-ENDLIST\n'; mime = 'application/vnd.apple.mpegurl'
+            elif route == '/ts-slow.m3u8':
+                body = b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:2.76,\nclip.ts\n#EXTINF:2.76,\nslow-second.ts\n#EXT-X-ENDLIST\n'; mime = 'application/vnd.apple.mpegurl'
             elif route == '/encrypted.m3u8':
                 body = b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\none.ts\n#EXT-X-ENDLIST\n'; mime = 'application/vnd.apple.mpegurl'
             elif route in ['/dash.mpd','/dash-template.mpd','/dash-protected.mpd','/dash-external.mpd','/dash-empty-audio.mpd']:
@@ -92,6 +99,7 @@ def server(media: Path):
                 body = b'<title>HLS fixture</title><video src="/master.m3u8"></video><video src="/encrypted.m3u8"></video>'
             elif route == '/private': body = b'<title>Private fixture</title><video src="/private.webm"></video>'
             elif route == '/dash': body = b'<title>DASH fixture</title><video src="/dash.mpd"></video><video src="/dash-template.mpd"></video><video src="/dash-protected.mpd"></video><video src="/dash-external.mpd"></video><video src="/dash-empty-audio.mpd"></video>'
+            elif route == '/ts-page': body = b'<title>TS fixture</title><video src="/ts.m3u8"></video><video src="/ts-slow.m3u8"></video><a download href="/clip.ts">direct</a><a download href="/bad.ts">invalid</a>'
             else:
                 self.send_error(404); return
             self.send_response(200)
@@ -99,6 +107,7 @@ def server(media: Path):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             if route.endswith('.m4s'): time.sleep(0.4)
+            if route == '/slow-second.ts': time.sleep(2)
             try: self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError): pass
         def log_message(self, *_): pass
@@ -271,6 +280,47 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 _, hub = open_page('chrome://internet-browser/')
                 durable = next(row for row in library()['videos'] if row['title']=='DASH fixture')
                 checks['dash_pair_survives_browser_restart'] = durable.get('audioUrl')==pair_row['audioUrl'] and durable['url']==pair_row['url']
+                open_page(base+'/ts-page')
+                _, hub = open_page('chrome://internet-browser/')
+                transport_candidates = api('scan')['items']
+                manifest_row = next(row for row in transport_candidates if row['url'].endswith('/ts.m3u8'))
+                transport_plan = api('inspect', manifest_row['token'])
+                if transport_plan.get('error'): raise RuntimeError(transport_plan['error'])
+                ts_row = transport_plan['items'][0]
+                checks['hls_transport_stream_resolved'] = ts_row.get('convertedFromTs') is True
+                ts_saved = api('download', ts_row['token'])
+                if not ts_saved.get('started'): raise RuntimeError(str(ts_saved))
+                ts_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==ts_saved['guid'] and row['state'] in (1,3)),None))
+                if ts_status['state']!=1: raise RuntimeError(str(ts_status))
+                checks['transport_processing_origin_isolated'] = ts_status.get('isolatedProcessor') is True
+                ts_path = next(profile.glob('*/InternetBrowserVideos/stream-'+ts_saved['guid'].split(':')[1]+'/video.mp4'))
+                checks['transport_stream_saved_as_mp4'] = ts_path.read_bytes()[4:8]==b'ftyp'
+                ts_catalog = next(row for row in library()['videos'] if row['url']==ts_path.as_uri())
+                cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserOpenVideo",'+json.dumps(ts_catalog['url'])+');})()')
+                cdp.call('Page.bringToFront',session=hub)
+                eventually(lambda: cdp.evaluate(hub, '!!document.querySelector("#internet-browser-player") && document.querySelector("video").readyState>=1'))
+                cdp.evaluate(hub, 'document.querySelector("video").play()',user_gesture=True)
+                checks['transport_mp4_video_and_audio_decoded'] = eventually(lambda: cdp.evaluate(hub, '(()=>{const v=document.querySelector("video");return v.currentTime>0.2&&v.webkitAudioDecodedByteCount>0&&v.webkitVideoDecodedByteCount>0&&v.videoWidth===1280&&v.videoHeight===720&&!v.error;})()'))
+                _, hub = open_page('chrome://internet-browser/')
+                direct_ts = next(row for row in transport_candidates if row['url'].endswith('/clip.ts'))
+                direct_saved = api('download', direct_ts['token'])
+                if not direct_saved.get('started'): raise RuntimeError(str(direct_saved))
+                direct_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==direct_saved['guid'] and row['state'] in (1,3)),None))
+                checks['direct_transport_stream_converted'] = direct_status['state']==1
+                invalid = next(row for row in transport_candidates if row['url'].endswith('/bad.ts'))
+                invalid_saved = api('download', invalid['token'])
+                invalid_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==invalid_saved['guid'] and row['state'] in (1,3)),None))
+                checks['invalid_transport_stream_not_registered'] = invalid_status['state']==3 and not list(profile.glob('*/InternetBrowserVideos/stream-'+invalid_saved['guid'].split(':')[1]+'/complete.json'))
+                checks['transmux_processor_released'] = eventually(lambda: not any(target.get('url')=='chrome://internet-browser-transmux/' for target in cdp.call('Target.getTargets')['targetInfos']))
+                slow = next(row for row in transport_candidates if row['url'].endswith('/ts-slow.m3u8'))
+                slow_plan = api('inspect', slow['token'])
+                slow_saved = api('download', slow_plan['items'][0]['token'])
+                if not slow_saved.get('started'): raise RuntimeError(str(slow_saved))
+                eventually(lambda: any(row['guid']==slow_saved['guid'] and row['state']==0 and row.get('completedParts',0)>=1 for row in api('transfers')['items']))
+                report['stage'] = 'close_browser_with_active_transmux'
+                cdp.call('Browser.close'); cdp.close(); cdp=None; browser.wait(timeout=20)
+                checks['active_transmux_browser_shutdown'] = browser.returncode==0
+                checks['active_transmux_partial_cleanup'] = not list(profile.glob('*/InternetBrowserVideos/stream-'+slow_saved['guid'].split(':')[1]))
                 report['assembled_mp4_sha256'] = hashlib.sha256(video).hexdigest()
                 report['all_checks_passed'] = all(checks.values())
         except Exception as error:

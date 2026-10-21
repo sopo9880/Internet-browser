@@ -226,8 +226,10 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                     checks['native_legacy_bookmark_dedup'] = '0개의 북마크를 가져왔습니다' in import_bookmarks()
                     cdp.call('Page.navigate', {'url': 'chrome://internet-browser/licenses.html'},
                              session=page_session)
+                    notice_manifest = json.loads((Path(__file__).resolve().parents[2] / 'third_party/native-notices/manifest.json').read_text(encoding='utf-8'))
+                    notice_count = sum('windows' in entry['platforms'] for entry in notice_manifest)
                     notices = eventually(lambda: cdp.evaluate(page_session,
-                        "document.querySelector('h1')?.textContent === '오픈소스 안내' && document.querySelectorAll('section').length === 2"))
+                        "document.querySelector('h1')?.textContent === '오픈소스 안내' && document.querySelectorAll('section').length === " + str(notice_count)))
                     checks['native_upstream_notices'] = bool(notices) and cdp.evaluate(
                         page_session, "document.body.textContent.includes('ByeDPI') && document.body.textContent.includes('Chromium')")
                     worker = eventually(lambda: next((item for item in

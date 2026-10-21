@@ -1,5 +1,6 @@
 # Keep pinned upstream notice bytes identical on Windows and Linux.
 third_party/native-notices/*.txt -text
 third_party/byedpi/LICENSE -text
+third_party/muxjs/** -text
 # Native source hashes must agree across Windows compilation and Linux staging.
 native/chromium/** text=auto eol=lf
