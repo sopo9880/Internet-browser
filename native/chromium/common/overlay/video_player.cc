@@ -46,15 +46,28 @@ class VideoPlayer : public base::SupportsUserData::Data,
             << " committed=" << navigation->HasCommitted()
             << " selected=" << (navigation->GetURL() == CurrentUrl());
     if (navigation->IsInPrimaryMainFrame() && navigation->HasCommitted() &&
-        !navigation->IsSameDocument() && navigation->GetURL() != CurrentUrl())
-      armed_ = false;
+        !navigation->IsSameDocument()) {
+      if (navigation->GetURL() != CurrentUrl())
+        armed_ = false;
+      injection_scheduled_ = false;
+    }
+  }
+  void DOMContentLoaded(content::RenderFrameHost* frame) override {
+    // A MediaDocument can be playable while its media resource still delays
+    // the window load event. The parsed document already contains <video>.
+    PrepareInjection(frame, frame->GetLastCommittedURL());
   }
   void DidFinishLoad(content::RenderFrameHost* frame, const GURL& url) override {
+    PrepareInjection(frame, url);
+  }
+  void PrepareInjection(content::RenderFrameHost* frame, const GURL& url) {
     VLOG(1) << "Local player document loaded: armed=" << armed_
             << " primary=" << (frame == web_contents()->GetPrimaryMainFrame())
             << " selected=" << (url == CurrentUrl());
-    if (!armed_ || frame != web_contents()->GetPrimaryMainFrame() || url != CurrentUrl())
+    if (!armed_ || injection_scheduled_ ||
+        frame != web_contents()->GetPrimaryMainFrame() || url != CurrentUrl())
       return;
+    injection_scheduled_ = true;
     auto options = videos_[index_].GetDict().Clone();
     options.Merge(player_options_.Clone());
     options.Set("hasPrevious", index_ > 0);
@@ -138,6 +151,7 @@ class VideoPlayer : public base::SupportsUserData::Data,
   base::FilePath state_file_;
   scoped_refptr<base::SequencedTaskRunner> writer_;
   bool armed_ = true;
+  bool injection_scheduled_ = false;
   base::WeakPtrFactory<VideoPlayer> weak_factory_{this};
 };
 }  // namespace
