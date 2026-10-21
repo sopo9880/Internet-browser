@@ -161,6 +161,28 @@ def stage(windows: Path, android: Path, output: Path, selection: dict,
             shutil.copyfile(source, target)
             copied[name] = sha256(target)
             require(copied[name] == sha256(source), 'Staged copy differs: ' + name)
+        source_document = temporary / 'SOURCE-RECONSTRUCTION.md'
+        shutil.copyfile(ROOT / 'docs/NATIVE_SOURCE_RECONSTRUCTION.md', source_document)
+        copied[source_document.name] = sha256(source_document)
+        notices_directory = ROOT / 'third_party/native-notices'
+        notices = json.loads((notices_directory / 'manifest.json').read_text(encoding='utf-8'))
+        for notice in notices:
+            source = notices_directory / notice['file']
+            require(source.resolve().parent == notices_directory.resolve() and
+                    sha256(source) == notice['sha256'], 'Upstream notice bytes differ')
+            target = temporary / ('upstream-' + notice['file'])
+            shutil.copyfile(source, target)
+            copied[target.name] = sha256(target)
+        shutil.copyfile(notices_directory / 'manifest.json', temporary / 'upstream-notices-manifest.json')
+        copied['upstream-notices-manifest.json'] = sha256(temporary / 'upstream-notices-manifest.json')
+        source_inputs = {'kind': 'NATIVE_SOURCE_RECONSTRUCTION_INFORMATION',
+                         'integration_commit': commit, 'integration_tree': tree,
+                         'integration_source_archive_url':
+                             f'https://github.com/sopo9880/Internet-browser/archive/{commit}.tar.gz',
+                         'product': PRODUCT, 'upstream_notices': notices,
+                         'complete_corresponding_source_included': False}
+        (temporary / 'native-source-inputs.json').write_text(json.dumps(source_inputs, indent=2) + '\n', encoding='utf-8')
+        copied['native-source-inputs.json'] = sha256(temporary / 'native-source-inputs.json')
         manifest = {'kind': 'EXACT_NATIVE_ARTIFACTS_STAGED_NOT_PUBLISHED', 'version': metadata.version,
                     'integration_tree': tree, **selection, 'files': copied,
                     'release_approved': False, 'published': False,

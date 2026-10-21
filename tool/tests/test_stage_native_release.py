@@ -160,6 +160,11 @@ class NativeReleaseStageTests(unittest.TestCase):
             selection = staging.select_artifacts(*self.origin(), COMMIT, RUN_ID)
             manifest = staging.stage(windows, android, output, selection, METADATA, COMMIT, TREE, Path('aapt2'), Path('apksigner'))
             self.assertFalse(manifest['release_approved']); self.assertFalse(manifest['published'])
+            source_inputs = json.loads((output / 'native-source-inputs.json').read_text())
+            self.assertEqual(source_inputs['integration_commit'], COMMIT)
+            self.assertFalse(source_inputs['complete_corresponding_source_included'])
+            for notice in source_inputs['upstream_notices']:
+                self.assertEqual(staging.sha256(output / ('upstream-' + notice['file'])), notice['sha256'])
             self.assertEqual((windows / 'mini_installer.exe').read_bytes(), (output / 'Internet-browser-Windows-Setup-v0.2.2.exe').read_bytes())
             for line in (output / 'SHA256SUMS.txt').read_text().splitlines():
                 digest, name = line.split('  ', 1)
