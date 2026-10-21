@@ -18,4 +18,17 @@ class InternetBrowserUIConfig
       : DefaultWebUIConfig(content::kChromeUIScheme, "internet-browser") {}
 };
 
+// A separate internal origin with no native message handlers. Media bytes are
+// processed here rather than delivered to an untrusted source-site renderer.
+class InternetBrowserTransmuxUI : public content::WebUIController {
+ public:
+  explicit InternetBrowserTransmuxUI(content::WebUI* web_ui);
+};
+class InternetBrowserTransmuxUIConfig
+    : public content::DefaultWebUIConfig<InternetBrowserTransmuxUI> {
+ public:
+  InternetBrowserTransmuxUIConfig()
+      : DefaultWebUIConfig(content::kChromeUIScheme, "internet-browser-transmux") {}
+};
+
 #endif

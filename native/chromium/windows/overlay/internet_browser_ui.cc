@@ -14,6 +14,7 @@
 #include "chrome/browser/internet_browser/legacy_data.h"
 #include "chrome/browser/internet_browser/video_player.h"
 #include "chrome/browser/internet_browser/video_downloads.h"
+#include "chrome/browser/internet_browser/video_capture.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
 #include "chrome/browser/internet_browser/transport.h"
 #include "chrome/browser/internet_browser/updater.h"
@@ -37,6 +38,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
                                public content::DownloadManager::Observer {
  public:
   void RegisterMessages() override {
+    web_ui()->RegisterMessageCallback("internetBrowserCapture",
+        base::BindRepeating(&InternetBrowserHandler::Capture, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserUpdate",
         base::BindRepeating(&InternetBrowserHandler::Update, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserStatus",
@@ -86,6 +89,20 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
   void Reply(const std::string& id, base::DictValue data) {
     if (IsJavascriptAllowed())
       ResolveJavascriptCallback(base::Value(id), data);
+  }
+  void Capture(const base::ListValue& args) {
+    if (args.size() < 2 || args.size() > 4 || !args[0].is_string() || !args[1].is_string()) return;
+    for (size_t i = 2; i < args.size(); ++i) if (!args[i].is_string()) return;
+    AllowJavascript();
+    auto* capture = internet_browser::VideoCapture::Get(Profile::FromWebUI(web_ui()));
+    auto reply = base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString());
+    const auto& command = args[1].GetString();
+    if (command == "scan" && args.size() == 2) capture->Scan(std::move(reply));
+    else if (command == "inspect" && args.size() == 3) capture->Inspect(args[2].GetString(), std::move(reply));
+    else if (command == "download" && args.size() == 3) capture->Download(args[2].GetString(), std::move(reply));
+    else if (command == "transfers" && args.size() == 2) std::move(reply).Run(capture->Transfers());
+    else if (command == "control" && args.size() == 4) std::move(reply).Run(capture->Control(args[2].GetString(), args[3].GetString()));
+    else { base::DictValue result; result.Set("error", "알 수 없는 영상 요청입니다."); std::move(reply).Run(std::move(result)); }
   }
   void Update(const base::ListValue& args) {
     if (args.size() != 2 || !args[0].is_string() || !args[1].is_string()) return;
@@ -326,3 +343,13 @@ InternetBrowserUI::InternetBrowserUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(std::make_unique<InternetBrowserHandler>());
 }
 InternetBrowserUI::~InternetBrowserUI() = default;
+
+InternetBrowserTransmuxUI::InternetBrowserTransmuxUI(content::WebUI* web_ui)
+    : content::WebUIController(web_ui) {
+  auto* source = content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui), "internet-browser-transmux");
+  source->SetRequestFilter(base::BindRepeating([](const std::string&) { return true; }),
+      base::BindRepeating([](const std::string&, content::WebUIDataSource::GotDataCallback reply) {
+        std::move(reply).Run(base::MakeRefCounted<base::RefCountedString>(
+            "<!doctype html><meta charset=utf-8><title>영상 처리</title>"));
+      }));
+}

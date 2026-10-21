@@ -214,11 +214,21 @@ def resource_header(android: bool = False) -> bytes:
                  'namespace internet_browser {',
                  'inline constexpr char kAppVersion[] = ' + json.dumps(PRODUCT['app_version']) + ';']
     for filename, constant in [('index.html', 'kIndexHtml'), ('app.js', 'kAppJs'),
-                               ('style.css', 'kStyleCss'), ('video_player.js', 'kVideoPlayerJs')]:
+                               ('style.css', 'kStyleCss'), ('video_player.js', 'kVideoPlayerJs'),
+                               ('video_discovery.js', 'kVideoDiscoveryJs'),
+                               ('video_transmuxer.js', 'kVideoTransmuxerJs')]:
         content = (ROOT / 'native/chromium/windows/resources' / filename).read_text(encoding='utf-8')
         if ')IBRESOURCE"' in content:
             raise ValueError('Unexpected raw-string delimiter in native resources')
         resources.append(f'inline constexpr char {constant}[] = R"IBRESOURCE({content})IBRESOURCE";')
+    try:
+        from .video_transmuxer import bundle_transmuxer
+    except ImportError:
+        from video_transmuxer import bundle_transmuxer
+    transmuxer = bundle_transmuxer()
+    if ')IBRESOURCE"' in transmuxer:
+        raise ValueError('Unexpected raw-string delimiter in transmuxer source')
+    resources.append(f'inline constexpr char kTransmuxerFactoryJs[] = R"IBRESOURCE({transmuxer})IBRESOURCE";')
     logo = (ROOT / 'assets/icon/parcel.svg').read_text(encoding='utf-8')
     if ')IBRESOURCE"' in logo:
         raise ValueError('Unexpected raw-string delimiter in product logo')
@@ -338,7 +348,8 @@ def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
         return replace_once(text,
             '  map.AddWebUIConfig(std::make_unique<ConflictsUIConfig>());',
             '  map.AddWebUIConfig(std::make_unique<ConflictsUIConfig>());\n'
-            '  map.AddWebUIConfig(std::make_unique<InternetBrowserUIConfig>());')
+            '  map.AddWebUIConfig(std::make_unique<InternetBrowserUIConfig>());\n'
+            '  map.AddWebUIConfig(std::make_unique<InternetBrowserTransmuxUIConfig>());')
     update('chrome/browser/ui/webui/chrome_web_ui_configs.cc', integrate_configs)
     def integrate_config_build(text: str) -> str:
         prefix, rest = text.split('source_set("configs") {', 1)

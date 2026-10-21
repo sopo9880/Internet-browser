@@ -6,6 +6,7 @@
 <main>
   <header><img src="logo.svg" width="72" height="72" alt="" aria-hidden="true"><div><p class="eyebrow">INTERNET BROWSER</p><h1>자유롭게, 편리하게.</h1><p>브라우징부터 확장 프로그램까지 한곳에서.</p></div></header>
   <nav aria-label="브라우저 기능">
+    <a href="#capture-section">영상 저장</a>
     <a href="chrome://extensions/">확장 프로그램</a>
     <a href="chrome://bookmarks/">북마크</a>
     <a href="chrome://history/">방문 기록</a>
@@ -39,6 +40,15 @@
     <p>기존 데이터는 보관한 채 새 브라우저에서도 사용할 수 있습니다.</p>
     <button id="import-bookmarks">북마크 가져오기</button><p id="import-status" role="status"></p>
     <details><summary>이전 방문 기록</summary><ul id="legacy-history"></ul></details>
+  </section>
+  <section id="capture-section">
+    <p class="eyebrow">VIDEO</p><h2>영상 저장</h2>
+    <p>영상을 다른 탭에서 재생한 뒤 검사하세요. 저장할 권한이 있는 영상을 선택해 주세요.</p>
+    <p class="muted">스트림 저장 중에는 원본 탭을 열어 두세요. MP4 형식의 HLS·DASH와 H.264/AAC MPEG-TS 구간(8 MB 이하)의 MP4 변환을 지원합니다. 분리된 영상·음성은 함께 보관해 서재에서 재생하며, 이를 단일 MP4로 합쳐 내보내기는 아직 지원하지 않습니다. 암호화·생방송 등은 지원하지 않습니다.</p>
+    <button id="scan-videos">열린 페이지의 영상 찾기</button>
+    <p id="capture-status" role="status"></p><ul id="capture-reasons"></ul><div id="capture-results"></div>
+    <h3>다운로드 진행 상황</h3><div id="video-transfers"></div>
+    <p><a href="chrome://downloads/">전체 다운로드 보기</a></p>
   </section>
   <section>
     <p class="eyebrow">LIBRARY</p><h2>저장한 영상</h2>

@@ -356,6 +356,86 @@ check. The packaged native smoke additionally passed the saved UTF-16 subtitle
 path priority over a neighboring SRT and unchanged-original-bytes checks.
 Android device acceptance is separate.
 
+## Native video discovery and saving (additional work after PR #10)
+
+The hub now has a unified Video Save section. An explicit scan inspects HTTP(S)
+tabs and frames in the exact same profile, including media elements, video
+metadata, bounded resource history and embedded JSON. It recognizes direct files,
+available unciphered YouTube muxed/adaptive MP4 formats and Instagram/JSON-LD video
+addresses. Adaptive MP4 saves retain the selected video with the highest-bitrate
+available MP4 audio track, rather than offering a silent video-only file.
+Only discovered opaque candidate IDs can start downloads; arbitrary hub-supplied
+addresses are not accepted. Source document lifetime, active state and URL are
+rechecked, including same-document navigation and back-forward cached pages.
+
+File downloads use the source frame's ordinary Chromium download path, with
+safety checks required. The hub shows progress, pause/resume/cancel controls and
+links to the complete download manager. Completed video files enter the existing
+library and player. Extensionless loaded media retain the server's container
+filename inference rather than being silently labeled MP4.
+
+HLS inspection offers the manifest's actual variants. Supported VOD playlists
+contain an MP4 initialization segment and unencrypted MP4 media fragments. Every
+manifest/part uses the standard frame-bound downloader; no safety verdict is
+overridden. A profile-owned job survives leaving the hub. Parts are assembled on
+a sequenced worker, and a completion marker registers only finished files in the
+library. Pause takes effect at a part boundary; cancellation removes partials.
+Keep the source tab open. Limits are 4 active jobs, 20,000 media parts per track,
+8 GiB combined video/audio and bounded manifest/address data. Interrupted parts can be retried;
+in-progress stream jobs do not resume across a complete browser restart.
+
+Static single-period MP4 DASH supports SegmentList, whole MP4 BaseURL tracks and
+SegmentTemplate with duration or SegmentTimeline, inherited template attributes,
+number/time formatting, RepresentationID and Bandwidth substitution. XML is
+parsed with Chromium's isolated data decoder. DTD/external entities, protected
+tracks, missing declared audio and unsupported ranges/formats are refused.
+Video and audio retain their original bytes as a library pair. The player keeps
+play/pause, seeking, rate and volume together, and the pair survives a browser
+restart. This is not a single muxed MP4 export; the UI states that limitation.
+
+Unencrypted H.264/AAC MPEG-TS HLS segments and direct TS clips (up to 8 MiB per
+input segment/clip) can be transmuxed to MP4 without re-encoding. The pinned
+mux.js 7.1.0 source closure is vendored unchanged with SHA-256 hashes, verified
+against its npm SHA-512 archive and GitHub commit
+`e1b4d161f51782e4712d020b66d5087bd6febb3d`. Apache-2.0 text and original Brightcove
+attribution are retained. The deterministic in-app loader needs no npm packages
+or runtime network code. Processing runs in a private, never-composited
+`chrome://internet-browser-transmux/` WebContents with no native message handlers;
+the original site's renderer does not receive the processing bytes. The runtime
+checks the distinct renderer process and expected internal origin. Input/output
+sizes, processing time and codec/configuration changes are bounded. Profile
+shutdown destroys that context and cleans incomplete files on its sequenced
+worker, including when the UI loop has already stopped.
+
+The controlled native browser test passed 43 checks covering the actual save screen and
+quality choices, byte-identical file download, generic/YouTube/Instagram data
+discovery, profile separation, encrypted HLS refusal, HLS variant selection,
+pause/resume/cancel, hub-navigation survival, exact MP4 assembly, cleanup, library
+registration, offline playback and rejection of stale documents/SPA URLs. It also
+checks adaptive MP4 pairs, DASH XML/template resolution, original video/audio
+bytes, synchronized playback/controls and durable pairs across browser restart.
+It also verifies TS-to-MP4 conversion, real 720p video/AAC decoding, isolated
+processing, malformed-input rejection and active-job shutdown/partial cleanup. This
+is controlled-page evidence, **not live YouTube/Instagram compatibility evidence**.
+The JavaScript discovery suite has 9 checks; release staging additionally requires
+the full native video smoke and its exact engine DLL hash.
+Stream parts use short per-attempt names inside each unique job directory, and
+the completion marker is flushed to a short CREATE-only staging file before
+being renamed. This avoids redundant temporary GUIDs exceeding Windows path
+limits in the nested runner checkout. Storage/access errors are distinguished
+from network interruption; incomplete output is never registered in the library.
+The updated Windows source browser also passed all 22 existing native smoke
+checks, retaining bookmark import, extension fixture behavior, subtitles,
+playback/resume and unchanged legacy data. The 117 Python tests passed with 3
+environment-specific skips; HLS C++ parser checks and workflow lint passed.
+
+Still required for the requested broader downloader: live site acceptance,
+YouTube signature-dependent formats, single-file export of separate tracks,
+larger TS segments, additional codecs/playlist features and live streams. These
+cases display explicit reasons instead of pretending a playlist or video-only
+track is a completed offline movie. DRM decryption is not implemented. The
+installed development app and previous installer do not contain these changes.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;

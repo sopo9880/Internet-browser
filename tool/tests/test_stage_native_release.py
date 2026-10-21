@@ -58,6 +58,11 @@ class NativeReleaseStageTests(unittest.TestCase):
                  'checks': dict.fromkeys(staging.SMOKE_CHECKS, True),
                  'real_adblock_id_verified': False, 'release_approved': False}
         self.write(directory / 'windows-smoke.json', smoke)
+        self.write(directory / 'video-capture-smoke.json', {
+            'kind': 'NATIVE_CONTROLLED_VIDEO_CAPTURE_SMOKE',
+            'chrome_exe_sha256': files['chrome.exe'], 'chrome_dll_sha256': payload['chrome.dll'],
+            'all_checks_passed': True, 'checks': dict.fromkeys(staging.VIDEO_CAPTURE_CHECKS, True),
+            'live_youtube_instagram_verified': False})
         return report, runtime, smoke
 
     def android(self, directory):
@@ -131,6 +136,21 @@ class NativeReleaseStageTests(unittest.TestCase):
             # prepare_windows records its pin inside product, unlike the Android marker.
             self.assertNotIn('source_revision', report['overlay'])
             self.assertEqual(staging.validate_windows(directory, COMMIT, TREE), report)
+
+    def test_video_capture_requires_full_passing_checks_and_same_engine_payload(self):
+        for case in ('missing-playback', 'failed-hls', 'different-dll', 'reported-error', 'missing-dash-audio'):
+            with self.subTest(case=case), TemporaryDirectory() as temporary:
+                directory = Path(temporary) / 'windows'; self.windows(directory)
+                path = directory / 'video-capture-smoke.json'
+                report = json.loads(path.read_text())
+                if case == 'missing-playback': del report['checks']['hls_saved_video_playable']
+                if case == 'failed-hls': report['checks']['hls_exact_assembled_bytes'] = False
+                if case == 'different-dll': report['chrome_dll_sha256'] = 'f' * 64
+                if case == 'reported-error': report['error'] = 'controlled failure'
+                if case == 'missing-dash-audio': del report['checks']['dash_video_and_audio_play_together']
+                self.write(path, report)
+                with self.assertRaisesRegex(ValueError, 'video capture'):
+                    staging.validate_windows(directory, COMMIT, TREE)
 
     @patch.object(staging, 'verify_native_apk')
     def test_android_rechecks_actual_signature_after_payload_hash(self, verify):

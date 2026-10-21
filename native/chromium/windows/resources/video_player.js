@@ -38,6 +38,37 @@ toolbar.append(title);
 const status = document.createElement('p');
 status.className = 'ib-status';
 status.setAttribute('role', 'status');
+// The library may retain separate original MP4 tracks. Keep one playback
+// timeline and controls; never silently play a video-only download as a movie.
+const companion = typeof options.audioUrl === 'string' ? document.createElement('audio') : null;
+if (companion) {
+  companion.id = 'internet-browser-companion-audio'; companion.hidden = true;
+  companion.preload = 'auto'; companion.src = options.audioUrl; root.append(companion);
+  video.pause();
+}
+const syncCompanion = () => {
+  if (!companion) return;
+  companion.volume = video.volume; companion.muted = video.muted;
+  companion.playbackRate = video.playbackRate;
+  if (companion.readyState >= 1 && Number.isFinite(video.currentTime) && Math.abs(companion.currentTime - video.currentTime) > 0.15)
+    companion.currentTime = video.currentTime;
+};
+const startPlayback = () => {
+  syncCompanion();
+  const tasks = [video.play()]; if (companion) tasks.push(companion.play());
+  return Promise.all(tasks).catch(() => {
+    video.pause(); companion?.pause(); status.textContent = '영상과 음성을 재생하지 못했습니다. 재생 버튼을 다시 눌러 주세요.';
+  });
+};
+if (companion) {
+  for (const name of ['seeking', 'seeked', 'timeupdate', 'ratechange', 'volumechange']) video.addEventListener(name, syncCompanion);
+  video.addEventListener('pause', () => companion.pause());
+  video.addEventListener('playing', () => {if (video.paused) return; syncCompanion(); companion.play().catch(() => {video.pause(); status.textContent = '음성을 재생하지 못했습니다. 재생 버튼을 다시 눌러 주세요.';});});
+  video.addEventListener('waiting', () => companion.pause());
+  companion.addEventListener('loadedmetadata', syncCompanion);
+  companion.addEventListener('error', () => {video.pause(); status.textContent = '저장된 음성 파일을 재생하지 못했습니다.';});
+  window.addEventListener('pagehide', () => companion.pause(), {once: true});
+}
 const button = (label, action) => {
   const element = document.createElement('button');
   element.type = 'button'; element.textContent = label;
@@ -65,7 +96,7 @@ const state = () => ({rate, volume: video.volume, fit: video.style.objectFit, lo
 const move = action => {report(true); send(action, state());};
 const previous = button('이전', () => move('previous'));
 previous.disabled = !options.hasPrevious;
-const toggle = () => video.paused ? video.play().catch(() => {status.textContent = '재생 버튼을 다시 눌러 주세요.';}) : video.pause();
+const toggle = () => video.paused ? startPlayback() : video.pause();
 const play = button('재생', toggle);
 const next = button('다음', () => move('next'));
 next.disabled = !options.hasNext;
@@ -247,7 +278,7 @@ video.addEventListener('error', () => {status.textContent = '영상을 재생하
 window.addEventListener('pagehide', () => report(true));
 if (navigator.mediaSession) {
   navigator.mediaSession.metadata = new MediaMetadata({title: title.textContent, artist: 'Internet Browser'});
-  for (const [action, handler] of Object.entries({play: () => video.play(), pause: () => video.pause(),
+  for (const [action, handler] of Object.entries({play: startPlayback, pause: () => video.pause(),
     seekbackward: details => seekBy(-(details.seekOffset || 10)), seekforward: details => seekBy(details.seekOffset || 10),
     seekto: details => {if (Number.isFinite(details.seekTime)) video.currentTime = details.seekTime;},
     nexttrack: () => {if (options.hasNext) move('next');}, previoustrack: () => {if (options.hasPrevious) move('previous');}})) {

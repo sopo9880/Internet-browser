@@ -133,6 +133,9 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
              'obj/chrome/browser/internet_browser/video_player/video_player.obj',
              'obj/chrome/browser/internet_browser/video_player/video_subtitles.obj',
              'obj/chrome/browser/internet_browser/updater/updater.obj',
+             'obj/chrome/browser/internet_browser/video_library/video_capture.obj',
+             'obj/chrome/browser/internet_browser/video_library/video_stream.obj',
+             'obj/chrome/browser/internet_browser/video_library/video_dash.obj',
              'obj/chrome/browser/internet_browser/video_library/video_downloads.obj'], cwd=source, env=env)
         run([vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowser', '-j', str(jobs),
              'chrome', 'mini_installer'], cwd=source, env=env)
@@ -165,6 +168,7 @@ def build(workspace: Path, jobs: int, prepare_only: bool,
                 outputs.write(f'appcontainer_acl_script={source / "build/win/set_appcontainer_acls.py"}\n')
                 outputs.write(f'runtime_root={workspace / "native-runtime-tests"}\n')
                 outputs.write(f'media_fixture={source / "media/test/data/bear-320x240.webm"}\n')
+                outputs.write(f'media_directory={source / "media/test/data"}\n')
         print('Native Chromium compiled. Runtime/AdBlock/release acceptance remains required.')
 
 
