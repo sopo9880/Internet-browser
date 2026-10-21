@@ -98,6 +98,10 @@ def validate_windows(source: Path, commit: str, tree: str) -> dict:
     runtime = json.loads((source / 'runtime-provenance.json').read_text(encoding='utf-8'))
     payload = runtime.get('files', {})
     require(runtime.get('kind') == 'NATIVE_RUNTIME_FROM_EXACT_INSTALLER_ARCHIVE' and
+            runtime.get('layout') == 'standalone_flat' and
+            runtime.get('appcontainer_read_execute_configured') is True and
+            runtime.get('sandbox_disabled') is False and
+            digest(runtime.get('appcontainer_acl_helper_sha256')) and
             runtime.get('product') == PRODUCT and runtime.get('integration_commit') == commit and
             runtime.get('source_archive_sha256') == files.get('chrome.7z') and
             digest(files.get('chrome.exe')) and payload.get('chrome.exe') == files['chrome.exe'],

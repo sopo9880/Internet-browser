@@ -32,6 +32,7 @@ class Cdp:
         self.socket = connect(url, open_timeout=10, close_timeout=2,
                               max_size=8 * 1024 * 1024)
         self.identifier = 0
+        self.diagnostics = []
 
     def close(self):
         self.socket.close()
@@ -45,8 +46,13 @@ class Cdp:
             message['sessionId'] = session
         self.socket.send(json.dumps(message))
         while True:
-            response = json.loads(self.socket.recv(timeout=20))
+            try:
+                response = json.loads(self.socket.recv(timeout=20))
+            except TimeoutError as error:
+                raise TimeoutError(f'{method}: browser reply timed out after 20 seconds') from error
             if response.get('id') != identifier:
+                if response.get('method') in ('Runtime.exceptionThrown', 'Log.entryAdded') and len(self.diagnostics) < 30:
+                    self.diagnostics.append(response)
                 continue
             if 'error' in response:
                 raise RuntimeError(f'{method}: {response["error"]}')
@@ -135,8 +141,10 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
     checks = report['checks']
     cdp = None
     browser = None
+    temporary = None
     try:
-        with TemporaryDirectory(prefix='native-windows-smoke-', dir=work) as temporary:
+        with TemporaryDirectory(prefix='native-windows-smoke-', dir=work,
+                                ignore_cleanup_errors=True) as temporary:
             profile = Path(temporary) / 'profile'
             profile.mkdir()
             # Keep this fixture independent of the user's previous DPI choice.
@@ -145,6 +153,8 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
             library = Path(temporary) / 'Videos'
             legacy = Path(temporary) / 'legacy'
             library.mkdir(); legacy.mkdir()
+            extension_fixture = Path(temporary) / 'fixture-extension'
+            shutil.copytree(FIXTURE, extension_fixture, ignore=shutil.ignore_patterns('_metadata'))
             fixture = media_fixture or executable.parents[2] / 'media/test/data/bear-320x240.webm'
             shutil.copyfile(fixture, library / 'sample.webm')
             subtitle = library / 'saved-captions.srt'
@@ -164,12 +174,13 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
             with (work / f'native-browser-{time.time_ns()}.log').open('wb') as log:
                 browser = subprocess.Popen([
                     str(executable), '--headless=new', '--disable-gpu',
+                    '--enable-logging=stderr', '--vmodule=video_player=1',
                     '--no-first-run', '--no-default-browser-check',
                     '--test-type=browser', f'--internet-browser-test-library={library}',
                     f'--internet-browser-test-legacy-directory={legacy}',
-                    '--disable-background-networking', '--remote-debugging-port=0',
+                    '--disable-background-networking', '--disable-component-update', '--remote-debugging-port=0',
                     '--remote-debugging-address=127.0.0.1',
-                    f'--user-data-dir={profile}', f'--load-extension={FIXTURE.resolve()}',
+                    f'--user-data-dir={profile}', f'--load-extension={extension_fixture}',
                     'about:blank',
                 ], stdout=log, stderr=subprocess.STDOUT)
                 try:
@@ -180,10 +191,17 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                     cdp = Cdp(info['webSocketDebuggerUrl'])
                     checks['native_browser_started'] = True
                     targets = cdp.call('Target.getTargets')['targetInfos']
-                    page = next(item for item in targets if item['type'] == 'page')
+                    report['initial_target_types'] = [
+                        {'type': item['type'], 'subtype': item.get('subtype'),
+                         'blank': item.get('url') == 'about:blank'} for item in targets]
+                    page = next(item for item in targets
+                                if item['type'] == 'page' and item.get('url') == 'about:blank'
+                                and not item.get('subtype'))
                     page_session = cdp.call('Target.attachToTarget', {
                         'targetId': page['targetId'], 'flatten': True})['sessionId']
                     cdp.call('Page.enable', session=page_session)
+                    cdp.call('Runtime.enable', session=page_session)
+                    cdp.call('Log.enable', session=page_session)
                     cdp.call('Page.navigate', {'url': 'chrome://internet-browser/'}, session=page_session)
                     eventually(lambda: cdp.evaluate(page_session,
                         "document.querySelector('#transport-status')?.textContent"),
@@ -196,12 +214,16 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                     checks['native_video_title_saved'] = eventually(lambda: saved_video().get('title')) == 'Renamed fixture'
                     checks['title_edit_preserves_legacy_position_fallback'] = 'lastPositionMs' not in saved_video()
                     def import_bookmarks():
-                        cdp.evaluate(page_session, "document.querySelector('#import-bookmarks').click()")
-                        return cdp.evaluate(page_session, "document.querySelector('#import-status').textContent")
-                    imported = eventually(import_bookmarks, lambda text: '1개의 북마크를 가져왔습니다' in text)
+                        cdp.evaluate(page_session, "document.querySelector('#import-status').textContent = ''; document.querySelector('#import-bookmarks').click()")
+                        status = eventually(lambda: cdp.evaluate(page_session,
+                            "!document.querySelector('#import-bookmarks').disabled && document.querySelector('#import-status').textContent"))
+                        report.setdefault('bookmark_import_results', []).append(status)
+                        return status
+                    imported = import_bookmarks()
+                    if '1개의 북마크를 가져왔습니다' not in imported:
+                        raise RuntimeError('Native bookmark import failed: ' + imported)
                     checks['native_legacy_bookmark_import'] = bool(imported)
-                    checks['native_legacy_bookmark_dedup'] = '0개의 북마크를 가져왔습니다' in eventually(
-                        import_bookmarks, lambda text: '0개의 북마크를 가져왔습니다' in text)
+                    checks['native_legacy_bookmark_dedup'] = '0개의 북마크를 가져왔습니다' in import_bookmarks()
                     cdp.call('Page.navigate', {'url': 'chrome://internet-browser/licenses.html'},
                              session=page_session)
                     notices = eventually(lambda: cdp.evaluate(page_session,
@@ -236,10 +258,13 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                         'url': f'chrome-extension://{extension_id}/popup.html'}, session=page_session)
                     checks['fixture_popup_document'] = eventually(lambda: cdp.evaluate(
                         page_session, "document.querySelector('#smoke-popup')?.textContent")) == 'Native extension popup document'
+                    report['stage'] = 'reopen_library_after_extension'
                     cdp.call('Page.navigate', {'url': 'chrome://internet-browser/'}, session=page_session)
                     eventually(lambda: cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\')?.textContent === "Renamed fixture"'))
                     cdp.evaluate(page_session, 'document.querySelector(\'#videos .play-video[data-video-url$="/sample.webm"]\').click()')
+                    report['stage'] = 'open_saved_video_player'
                     eventually(lambda: cdp.evaluate(page_session, "!!document.querySelector('#internet-browser-player')"))
+                    report['stage'] = 'load_saved_subtitle'
                     checks['native_saved_external_subtitle_loaded'] = eventually(lambda: cdp.evaluate(page_session,
                         'document.querySelector("video").textTracks[0]?.cues?.[0]?.getCueAsHTML().textContent')) == '저장된 외부 자막'
                     cdp.evaluate(page_session, "document.querySelector('video').pause()")
@@ -268,6 +293,12 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                 finally:
                     if cdp:
                         try:
+                            report['final_page'] = cdp.evaluate(page_session,
+                                "({url:location.href,text:document.body?.innerText?.slice(0,1500),video:document.querySelector('video')?{readyState:document.querySelector('video').readyState,error:document.querySelector('video').error?.message}:null})")
+                        except Exception:
+                            pass
+                        report['browser_diagnostics'] = cdp.diagnostics
+                        try:
                             cdp.call('Browser.close')
                         except Exception:
                             pass
@@ -280,7 +311,9 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                         browser.wait(timeout=10)
     except Exception as error:
         report['error'] = str(error)
+        report['error_type'] = type(error).__name__
     finally:
+        report['temporary_test_directory_retained'] = bool(temporary and Path(temporary).exists())
         report_file.parent.mkdir(exist_ok=True, parents=True)
         report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return report

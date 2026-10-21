@@ -204,9 +204,11 @@ jobs:
         shell: cmd
         env:
           NATIVE_EXTRACTOR: ${{ steps.native_build.outputs.extractor }}
+          NATIVE_ACL_SCRIPT: ${{ steps.native_build.outputs.appcontainer_acl_script }}
+          NATIVE_RUNTIME_ROOT: ${{ steps.native_build.outputs.runtime_root }}
         run: |
-          python tool/chromium/prepare_windows_runtime.py --build build/native-windows --runtime build/native-windows-runtime --extractor "%NATIVE_EXTRACTOR%" || exit /b 1
-          copy build\native-windows-runtime\runtime-provenance.json build\native-windows\runtime-provenance.json
+          python tool/chromium/prepare_windows_runtime.py --build build/native-windows --runtime "%NATIVE_RUNTIME_ROOT%\%GITHUB_RUN_ID%-%GITHUB_RUN_ATTEMPT%" --extractor "%NATIVE_EXTRACTOR%" --appcontainer-acl-script "%NATIVE_ACL_SCRIPT%" || exit /b 1
+          copy "%NATIVE_RUNTIME_ROOT%\%GITHUB_RUN_ID%-%GITHUB_RUN_ATTEMPT%\runtime-provenance.json" build\native-windows\runtime-provenance.json
       - name: Controlled packaged-native fixture and media smoke (not AdBlock acceptance)
         shell: cmd
         env:

@@ -47,6 +47,9 @@ class NativeReleaseStageTests(unittest.TestCase):
         self.write(directory / 'native-provenance.json', report)
         payload = {'chrome.exe': files['chrome.exe'], 'chrome.dll': 'd' * 64}
         runtime = {'kind': 'NATIVE_RUNTIME_FROM_EXACT_INSTALLER_ARCHIVE', 'product': staging.PRODUCT,
+                   'layout': 'standalone_flat',
+                   'appcontainer_read_execute_configured': True, 'sandbox_disabled': False,
+                   'appcontainer_acl_helper_sha256': 'a' * 64,
                    'integration_commit': COMMIT, 'source_archive_sha256': files['chrome.7z'],
                    'files': payload, 'payload_fingerprint_sha256': hashlib.sha256(
                        json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
@@ -102,7 +105,7 @@ class NativeReleaseStageTests(unittest.TestCase):
                 staging.select_artifacts(run, listing, COMMIT, RUN_ID)
 
     def test_windows_rejects_changed_bytes_source_overlay_runtime_or_failed_smoke(self):
-        for case in ('bytes', 'tree', 'source', 'overlay', 'runtime', 'smoke', 'empty-smoke', 'other-exe'):
+        for case in ('bytes', 'tree', 'source', 'overlay', 'runtime', 'sandbox', 'acl', 'smoke', 'empty-smoke', 'other-exe'):
             with self.subTest(case=case), TemporaryDirectory() as temporary:
                 directory = Path(temporary) / 'windows'
                 report, runtime, smoke = self.windows(directory)
@@ -111,6 +114,8 @@ class NativeReleaseStageTests(unittest.TestCase):
                 if case == 'source': report['source_revision'] = 'f' * 40
                 if case == 'overlay': report['overlay']['files'].clear()
                 if case == 'runtime': runtime['source_archive_sha256'] = 'f' * 64
+                if case == 'sandbox': runtime['sandbox_disabled'] = True
+                if case == 'acl': runtime['appcontainer_read_execute_configured'] = False
                 if case == 'smoke': smoke['checks']['native_browser_started'] = False
                 if case == 'empty-smoke': smoke['checks'].clear()
                 if case == 'other-exe': smoke['chrome_exe_sha256'] = 'f' * 64

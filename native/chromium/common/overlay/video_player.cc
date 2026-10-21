@@ -7,6 +7,7 @@
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
 #include "base/task/sequenced_task_runner.h"
@@ -41,11 +42,17 @@ class VideoPlayer : public base::SupportsUserData::Data,
         state_file_(file), writer_(base::ThreadPool::CreateSequencedTaskRunner(
             {base::MayBlock(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN})) {}
   void DidFinishNavigation(content::NavigationHandle* navigation) override {
+    VLOG(1) << "Local player navigation: primary=" << navigation->IsInPrimaryMainFrame()
+            << " committed=" << navigation->HasCommitted()
+            << " selected=" << (navigation->GetURL() == CurrentUrl());
     if (navigation->IsInPrimaryMainFrame() && navigation->HasCommitted() &&
         !navigation->IsSameDocument() && navigation->GetURL() != CurrentUrl())
       armed_ = false;
   }
   void DidFinishLoad(content::RenderFrameHost* frame, const GURL& url) override {
+    VLOG(1) << "Local player document loaded: armed=" << armed_
+            << " primary=" << (frame == web_contents()->GetPrimaryMainFrame())
+            << " selected=" << (url == CurrentUrl());
     if (!armed_ || frame != web_contents()->GetPrimaryMainFrame() || url != CurrentUrl())
       return;
     auto options = videos_[index_].GetDict().Clone();
@@ -59,6 +66,7 @@ class VideoPlayer : public base::SupportsUserData::Data,
   }
   void Inject(content::WeakDocumentPtr document, base::DictValue options) {
     auto* frame = document.AsRenderFrameHostIfValid();
+    VLOG(1) << "Local player injection: document=" << !!frame << " armed=" << armed_;
     if (!frame || !armed_ || frame != web_contents()->GetPrimaryMainFrame() ||
         frame->GetLastCommittedURL() != CurrentUrl()) return;
     std::string json;

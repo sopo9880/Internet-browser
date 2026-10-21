@@ -275,13 +275,26 @@ restart persistence and ByeDPI operation remain unverified.
 
 Windows CI now prepares its test runtime from the exact `chrome.7z` whose hash
 matches native build provenance. The helper rejects escaping/linked/colliding
-archive paths, retains the installer layout and copies version files beside the
-launcher, verifies the packaged launcher, checks required resources/transport,
-and fingerprints every copied file. This copy keeps tests independent of later
-compiler writes. A pinned-7za synthetic archive check and path-rejection tests
-passed. The real installer archive has not completed, so the packaged app has
-not been launched by this new path; OS installer execution is also separate.
-The runtime fixture/media smoke continues to keep AdBlock acceptance false.
+archive paths, creates a coherent standalone layout from version-directory
+files, verifies the packaged launcher, checks required resources/transport,
+and fingerprints every copied file. Keeping a duplicate installed-version
+directory beside the flattened launcher stalled renderer replies in the real
+Windows package; removing that duplicate restored normal rendering. The helper
+checks the pinned upstream AppContainer ACL helper before granting sandboxed
+processes read/execute access to this owned copy. The sandbox stays enabled.
+Preparation uses a unique final wrapper and completion marker, avoiding a
+directory rename that failed with access denied in the OneDrive CI checkout.
+
+The Windows browser and mini-installer compiled successfully at 9e878393.
+Local packaged-runtime checks now pass startup, product WebUI, video title
+editing, legacy bookmark import/deduplication, upstream notices, fixture MV3/DNR,
+controlled navigation/download and fixture popup document. The saved-video
+player check still fails: the local media document reaches readyState 4 but the
+custom player is absent. This blocks a successful full runtime report. Genuine
+AdBlock installation/native popup and OS installer execution remain unverified.
+Android's seven ARM64 product objects compiled at 0f5a987 after replacing a
+Windows-only process-status call with POSIX termination-status handling. This
+does not constitute a complete APK build or device validation.
 
 The local player now reads the legacy `subtitlePath` first, then adjacent
 same-basename SRT/VTT/ASS files, on a worker. Reads are limited to 2 MiB local
