@@ -356,6 +356,52 @@ check. The packaged native smoke additionally passed the saved UTF-16 subtitle
 path priority over a neighboring SRT and unchanged-original-bytes checks.
 Android device acceptance is separate.
 
+## Native video discovery and saving (additional work after PR #10)
+
+The hub now has a unified Video Save section. An explicit scan inspects HTTP(S)
+tabs and frames in the exact same profile, including media elements, video
+metadata, bounded resource history and embedded JSON. It recognizes direct files,
+available unciphered YouTube muxed formats and Instagram/JSON-LD video addresses.
+Only discovered opaque candidate IDs can start downloads; arbitrary hub-supplied
+addresses are not accepted. Source document lifetime, active state and URL are
+rechecked, including same-document navigation and back-forward cached pages.
+
+File downloads use the source frame's ordinary Chromium download path, with
+safety checks required. The hub shows progress, pause/resume/cancel controls and
+links to the complete download manager. Completed video files enter the existing
+library and player. Extensionless loaded media retain the server's container
+filename inference rather than being silently labeled MP4.
+
+HLS inspection offers the manifest's actual variants. Supported VOD playlists
+contain an MP4 initialization segment and unencrypted MP4 media fragments. Every
+manifest/part uses the standard frame-bound downloader; no safety verdict is
+overridden. A profile-owned job survives leaving the hub. Parts are assembled on
+a sequenced worker, and a completion marker registers only finished files in the
+library. Pause takes effect at a part boundary; cancellation removes partials.
+Keep the source tab open. Limits are 4 active jobs, 20,000 parts, 256 MiB per part,
+8 GiB total and bounded manifest/address data. Interrupted parts can be retried;
+in-progress stream jobs do not resume across a complete browser restart.
+
+The controlled native browser test passed 21 checks: the actual save screen and
+quality choices, byte-identical file download, generic/YouTube/Instagram data
+discovery, profile separation, encrypted HLS refusal, HLS variant selection,
+pause/resume/cancel, hub-navigation survival, exact MP4 assembly, cleanup, library
+registration, offline playback and rejection of stale documents/SPA URLs. This
+is controlled-page evidence, **not live YouTube/Instagram compatibility evidence**.
+The JavaScript discovery suite has 8 checks; release staging additionally requires
+the full native video smoke and its exact engine DLL hash.
+The updated Windows source browser also passed all 22 existing native smoke
+checks, retaining bookmark import, extension fixture behavior, subtitles,
+playback/resume and unchanged legacy data. The 115 Python tests passed with 3
+environment-specific skips; HLS C++ parser checks and workflow lint passed.
+
+Still required for the requested broader downloader: live site acceptance,
+YouTube signature-dependent/adaptive formats, DASH and separate audio/video
+muxing, MPEG-TS remuxing, additional playlist features and live streams. These
+cases display explicit reasons instead of pretending a playlist or video-only
+track is a completed offline movie. DRM decryption is not implemented. The
+installed development app and previous installer do not contain these changes.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;

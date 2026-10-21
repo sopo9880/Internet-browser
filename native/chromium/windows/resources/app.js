@@ -142,6 +142,126 @@ document.querySelector('#refresh-videos').addEventListener('click', refreshLibra
 window.addEventListener('focus', refreshLibrary);
 await refreshLibrary();
 
+const captureStatus = document.querySelector('#capture-status');
+const scanButton = document.querySelector('#scan-videos');
+scanButton.addEventListener('click', async () => {
+  scanButton.disabled = true;
+  captureStatus.textContent = '열린 페이지에서 영상을 찾고 있습니다…';
+  document.querySelector('#capture-results').replaceChildren();
+  document.querySelector('#capture-reasons').replaceChildren();
+  try {
+    const result = await sendWithPromise('internetBrowserCapture', 'scan');
+    if (result.error) throw new Error(result.error);
+    const groups = new Map();
+    for (const item of result.items || []) {
+      if (!groups.has(item.page)) groups.set(item.page, []);
+      groups.get(item.page).push(item);
+    }
+    captureStatus.textContent = result.items.length ? `${result.items.length}개의 저장 후보를 찾았습니다.`
+      : '저장 가능한 영상 파일을 찾지 못했습니다. 원본 탭에서 영상을 재생한 뒤 다시 검사하세요.';
+    if (result.partial) captureStatus.textContent += ' 응답하지 않는 일부 페이지는 제외했습니다.';
+    for (const reason of result.reasons || []) {
+      const li = document.createElement('li'); li.textContent = reason;
+      document.querySelector('#capture-reasons').append(li);
+    }
+    for (const [page, items] of groups) {
+      const row = document.createElement('article');
+      const description = document.createElement('div');
+      const heading = document.createElement('h3'); heading.textContent = items[0].title || '영상';
+      const source = document.createElement('p'); source.className = 'muted';
+      try { source.textContent = new URL(page).hostname; } catch { source.textContent = '열린 페이지'; }
+      const select = document.createElement('select'); select.setAttribute('aria-label', '저장할 영상과 화질');
+      for (const [index, item] of items.entries()) {
+        const option = document.createElement('option'); option.value = String(index);
+        option.textContent = `${item.quality || '원본 화질'} · ${item.kind === 'stream' ? '저장 가능한 MP4 스트림' : item.kind === 'file' ? (item.mime || '영상 파일') : item.kind.toUpperCase()} · ${index + 1}`;
+        select.append(option);
+      }
+      const save = document.createElement('button'); save.textContent = '영상 저장';
+      const updateSaveLabel = () => { save.textContent = ['hls', 'dash'].includes(items[Number(select.value)].kind) ? '스트림 확인' : '영상 저장'; };
+      select.addEventListener('change', updateSaveLabel); updateSaveLabel();
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try {
+          const selected = items[Number(select.value)];
+          if (['hls', 'dash'].includes(selected.kind)) {
+            captureStatus.textContent = '스트림 형식과 제공 화질을 확인하고 있습니다…';
+            const response = await sendWithPromise('internetBrowserCapture', 'inspect', selected.token);
+            if (response.error) throw new Error(response.error);
+            for (const item of response.items || []) {
+              const index = items.length; items.push(item);
+              const option = document.createElement('option'); option.value = String(index);
+              option.textContent = `${item.quality || '원본 화질'} · ${item.kind === 'stream' ? '저장 가능한 MP4 스트림' : 'HLS 화질 선택'}`;
+              select.append(option);
+            }
+            if (response.items?.length) {
+              select.value = String(items.length - response.items.length); updateSaveLabel();
+              captureStatus.textContent = response.items.some(item => item.kind === 'stream') ? '저장 가능한 스트림입니다. 영상 저장을 눌러 주세요.' : '제공 화질을 선택한 뒤 스트림 확인을 눌러 주세요.';
+            } else captureStatus.textContent = '저장 가능한 스트림을 찾지 못했습니다.';
+            return;
+          }
+          const response = await sendWithPromise('internetBrowserCapture', 'download', selected.token);
+          captureStatus.textContent = response.error || (response.started ? '다운로드를 시작했습니다. 완료되면 서재에 표시됩니다.' : '다운로드를 시작하지 못했습니다.');
+          await refreshTransfers();
+        } catch (error) { captureStatus.textContent = error.message || '다운로드를 시작하지 못했습니다. 다시 검사해 주세요.'; }
+        finally { save.disabled = false; }
+      });
+      description.append(heading, source, select); row.append(description, save);
+      document.querySelector('#capture-results').append(row);
+    }
+  } catch (error) { captureStatus.textContent = error.message || '영상을 검사하지 못했습니다.'; }
+  finally { scanButton.disabled = false; }
+});
+let transfersLoading = false;
+let transferSummary = '';
+async function refreshTransfers() {
+  if (transfersLoading || document.hidden) return;
+  transfersLoading = true;
+  try {
+    const result = await sendWithPromise('internetBrowserCapture', 'transfers');
+    if (result.error) throw new Error(result.error);
+    const summary = JSON.stringify(result.items.map(item => [item.guid, item.state, item.paused]));
+    if (transferSummary && summary !== transferSummary) await refreshLibrary();
+    transferSummary = summary;
+    const container = document.querySelector('#video-transfers'); container.replaceChildren();
+    for (const item of result.items) {
+      const row = document.createElement('div'); row.className = 'video-transfer';
+      const text = document.createElement('p');
+      const states = ['다운로드 중', '완료', '취소됨', '중단됨'];
+      const state = item.blocked ? '브라우저의 안전 확인이 필요합니다. 전체 다운로드에서 확인하세요.'
+        : item.pausing ? '현재 구간을 마친 뒤 일시정지' : item.paused ? '일시정지' : states[item.state] || '상태 확인 중';
+      const amount = `${(item.received / 1048576).toFixed(1)} MB`;
+      text.textContent = `${item.name} · ${state} · ${amount}${item.stream ? ` · ${item.completedParts}/${item.totalParts} 구간` : ''}${item.error ? ` · ${item.error}` : ''}`;
+      row.append(text);
+      if (item.total > 0) {
+        const progress = document.createElement('progress'); progress.max = item.total; progress.value = item.received;
+        progress.setAttribute('aria-label', `${item.name} 다운로드 진행률`); row.append(progress);
+      }
+      for (const [action, label, visible] of [
+        ['pause', '일시정지', item.state === 0 && !item.paused],
+        ['resume', '재개', item.canResume], ['cancel', '취소', item.state === 0]
+      ]) {
+        if (!visible || item.blocked) continue;
+        const button = document.createElement('button'); button.className = 'secondary'; button.textContent = label;
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            const response = await sendWithPromise('internetBrowserCapture', 'control', item.guid, action);
+            if (response.error) captureStatus.textContent = response.error;
+          } catch { captureStatus.textContent = '다운로드 상태를 변경하지 못했습니다.'; }
+          finally { await refreshTransfers(); }
+        });
+        row.append(button);
+      }
+      container.append(row);
+    }
+    if (!result.items.length) container.textContent = '진행 중인 영상 다운로드가 없습니다.';
+  } catch { document.querySelector('#video-transfers').textContent = '다운로드 상태를 불러오지 못했습니다.'; }
+  finally { transfersLoading = false; }
+}
+await refreshTransfers();
+setInterval(refreshTransfers, 1500);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshTransfers(); });
+
 const updateStatus = document.querySelector('#update-status');
 const updateAuto = document.querySelector('#update-auto');
 const updateRelease = document.querySelector('#update-release');

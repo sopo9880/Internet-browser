@@ -33,6 +33,13 @@ SMOKE_CHECKS = {'native_browser_started', 'native_product_webui', 'native_upstre
                 'native_downloaded_video_player', 'native_saved_external_subtitle_loaded',
                 'original_library_unchanged', 'original_preferences_unchanged',
                 'original_subtitle_unchanged'}
+VIDEO_CAPTURE_CHECKS = {'capture_screen_and_quality_options', 'native_capture_download_exact_bytes',
+    'generic_video_detected', 'youtube_muxed_quality_detected', 'instagram_video_detected',
+    'other_profile_excluded', 'encrypted_hls_rejected_with_reason', 'hls_actual_quality_selected',
+    'hls_resolved_to_mp4_parts', 'hls_pause', 'hls_resume', 'hls_survives_hub_navigation',
+    'hls_exact_assembled_bytes', 'hls_partial_files_removed', 'hls_cancel', 'hls_cancel_not_in_library',
+    'hls_automatically_in_library', 'hls_saved_video_playable', 'same_document_video_change_rejected',
+    'stale_source_document_rejected', 'hls_pause_at_part_boundary'}
 
 
 def require(condition: bool, message: str) -> None:
@@ -115,6 +122,14 @@ def validate_windows(source: Path, commit: str, tree: str) -> dict:
             smoke.get('chrome_exe_sha256') == files['chrome.exe'] and 'error' not in smoke and
             SMOKE_CHECKS <= checks.keys() and all(value is True for value in checks.values()),
             'Packaged Windows native fixture/media smoke is missing or failed')
+    capture = json.loads((source / 'video-capture-smoke.json').read_text(encoding='utf-8'))
+    capture_checks = capture.get('checks', {})
+    require(capture.get('kind') == 'NATIVE_CONTROLLED_VIDEO_CAPTURE_SMOKE' and
+            capture.get('chrome_exe_sha256') == payload.get('chrome.exe') and
+            digest(payload.get('chrome.dll')) and capture.get('chrome_dll_sha256') == payload['chrome.dll'] and
+            capture.get('all_checks_passed') is True and 'error' not in capture and
+            VIDEO_CAPTURE_CHECKS <= capture_checks.keys() and all(value is True for value in capture_checks.values()),
+            'Packaged Windows video capture/stream smoke is missing, failed or from a different browser payload')
     return report
 
 
@@ -154,7 +169,8 @@ def stage(windows: Path, android: Path, output: Path, selection: dict,
             'android-release-provenance.json': android / 'android-release-provenance.json',
             'windows-release-provenance.json': windows / 'native-provenance.json',
             'windows-runtime-provenance.json': windows / 'runtime-provenance.json',
-            'windows-smoke.json': windows / 'windows-smoke.json'}
+            'windows-smoke.json': windows / 'windows-smoke.json',
+            'video-capture-smoke.json': windows / 'video-capture-smoke.json'}
         copied = {}
         for name, source in names.items():
             target = temporary / name
