@@ -21,8 +21,12 @@ characters, within the Windows 39-character limit. The earlier
 the actual installer to hit `NOTREACHED` during shortcut registration, after
 copying the application payload. Payload hashes alone therefore do not prove a
 successful installation. Product name, install path, AppID and user-data paths
-are preserved by this correction; actual installer completion still needs
-verification with the corrected build.
+are preserved by this correction. The corrected `313c942` development installer
+was actually executed: it returned exit code 0 with no new fatal log, all 258
+installed payload files matched the packaged runtime, both 38-character ProgIDs
+pointed to the installed executable, and the Desktop/Start menu shortcuts had
+the correct target. This verifies replacement of the prior native development
+build; it does not establish the separate Flutter-to-native migration flow.
 
 The overlay adds `chrome://internet-browser/` and a browser-owned ByeDPI process.
 Only allowlisted presets are accepted. Configuration is saved atomically in
