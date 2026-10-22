@@ -28,6 +28,19 @@ test('unsafe schemes and embedded credentials cannot become candidates', () => {
     video('https://name:secret@example.test/a.mp4'), video('data:video/mp4,abc')]});
   assert.equal(result.items.length, 0);
 });
+test('generic player JSON and extensionless MIME endpoints expose HLS, DASH and video files', () => {
+  const result = scan({resources: [{name:'https://cdn.test/play?mime=video%2Fwebm'}], scripts:[{
+    type:'application/json', textContent:JSON.stringify({sources:[
+      {file:'https://cdn.test/playlist?id=7',type:'application/x-mpegURL'},
+      {src:'https://cdn.test/dash?id=7',type:'application/dash+xml'},
+      {url:'https://cdn.test/movie.webm'}, {url:'https://cdn.test/thumbnail.jpg'},
+      {hlsUrl:'https://cdn.test/hls?id=7'}, {dashUrl:'https://cdn.test/mpd?id=7'}
+    ]})}]});
+  assert.equal(result.items.length,6);
+  assert.equal(result.items.filter(item=>item.kind==='hls').length,2);
+  assert.equal(result.items.filter(item=>item.kind==='dash').length,2);
+  assert.ok(result.items.some(item=>item.url.includes('?mime=') && item.mime==='video/webm'));
+});
 test('DRM and unresolved blob media explain inability to save', () => {
   assert.equal(scan({videos: [video('https://cdn.test/drm.mp4', {mediaKeys: {}})]}).items.length, 0);
   const result = scan({videos: [video('blob:https://example.test/id')]});

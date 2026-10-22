@@ -26,6 +26,8 @@ int main() {
   assert(resolved.error.empty() && resolved.variants.size() == 1);
   assert(resolved.variants[0].audio_address == "original.m3u8");
   assert(resolved.variants[0].audio_language == "ko" && resolved.variants[0].frame_rate == "60.000");
+  auto inband = ParseVideoPlaylist("#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",NAME=\"Original\"\n#EXT-X-STREAM-INF:AUDIO=\"a\",BANDWIDTH=500\nv.m3u8\n", true);
+  assert(inband.error.empty() && inband.variants[0].audio_address.empty());
   assert(!ParseVideoPlaylist("#EXTM3U\n#EXT-X-STREAM-INF:AUDIO=\"missing\"\nv.m3u8\n", true).error.empty());
   assert(!ParseVideoPlaylist("#EXTM3U\n#EXT-X-SESSION-KEY:METHOD=SAMPLE-AES,URI=\"secret\"\n", true).error.empty());
 }

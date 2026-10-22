@@ -16,6 +16,7 @@
 #include "chrome/browser/internet_browser/video_playlist.h"
 #include "chrome/browser/internet_browser/video_dash.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
+#include "chrome/browser/internet_browser/video_request.h"
 #include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
@@ -160,9 +161,10 @@ void DeletePartialDirectory(base::FilePath path) {
   }
 }
 }
-VideoStream::VideoStream(Profile* profile, content::WeakDocumentPtr document, std::string title, std::string page)
+VideoStream::VideoStream(Profile* profile, content::WeakDocumentPtr document, std::string title, std::string page, std::string referrer_policy)
     : profile_(profile), document_(document), title_(std::move(title)), page_(std::move(page)),
       id_("stream:" + base::UnguessableToken::Create().ToString()),
+      referrer_policy_(std::move(referrer_policy)),
       worker_(base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN})) {
   directory_ = profile->GetPath().AppendASCII("InternetBrowserVideos").AppendASCII("stream-" + id_.substr(7));
   if (auto* frame = document_.AsRenderFrameHostIfValid()) source_url_ = frame->GetLastCommittedURL().GetWithoutRef();
@@ -185,8 +187,8 @@ void VideoStream::Shutdown() {
     worker_->PostTask(FROM_HERE, base::BindOnce(&DeletePartialDirectory, directory_));
   }
 }
-void VideoStream::Inspect(GURL manifest, Reply reply, bool dash) {
-  inspect_ = true; dash_ = dash;
+void VideoStream::Inspect(GURL manifest, Reply reply, bool dash, GURL audio_manifest) {
+  inspect_ = true; dash_ = dash; audio_manifest_ = std::move(audio_manifest);
   base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
       base::BindOnce([](base::WeakPtr<VideoStream> job) {
         if (job && job->state_ == 0) job->Fail("스트림 확인 시간이 초과되었습니다. 원본 탭을 확인하고 다시 시도해 주세요.");
@@ -195,8 +197,8 @@ void VideoStream::Inspect(GURL manifest, Reply reply, bool dash) {
       base::BindOnce(&Directory, directory_), base::BindOnce(&VideoStream::DirectoryReady,
       weak_factory_.GetWeakPtr(), true, std::move(manifest), std::move(reply)));
 }
-void VideoStream::Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts, bool transport_stream) {
-  transport_stream_ = transport_stream;
+void VideoStream::Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts, bool transport_stream, bool audio_transport_stream) {
+  transport_stream_ = transport_stream; audio_transport_stream_ = audio_transport_stream;
   parts_ = std::move(parts);
   audio_start_ = parts_.size();
   for (auto& url : audio_parts) parts_.push_back(std::move(url));
@@ -224,6 +226,7 @@ void VideoStream::Fetch(const GURL& url, const base::FilePath& target) {
     Fail("지원하지 않는 영상 구간 주소입니다."); return;
   }
   auto parameters = frame->CreateDownloadUrlParameters(url, kTraffic);
+  SetVideoReferrer(frame, url, referrer_policy_, parameters.get());
   parameters->set_file_path(target);
   parameters->set_transient(true);
   parameters->set_require_safety_checks(true);
@@ -241,9 +244,9 @@ void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
   if (item->IsDangerous() || item->IsInsecure()) {
     Fail("브라우저의 안전 검사로 영상 저장을 중단했습니다."); return;
   }
-  if (item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : transport_stream_ ? 8LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
+  if (item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : TransportPart() ? 8LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
       received_ + item->GetReceivedBytes() > 8.0 * 1024 * 1024 * 1024) {
-    Fail(inspect_ ? "재생 목록이 2 MB 제한을 초과했습니다." : transport_stream_ ? "MPEG-TS 구간이 현재 변환 제한인 8 MB를 초과했습니다." : "영상·음성의 합계가 현재 저장 제한인 8 GB를 초과했습니다."); return;
+    Fail(inspect_ ? "재생 목록이 2 MB 제한을 초과했습니다." : TransportPart() ? "MPEG-TS 구간이 현재 변환 제한인 8 MB를 초과했습니다." : "영상·음성의 합계가 현재 저장 제한인 8 GB를 초과했습니다."); return;
   }
   if (item->GetState() == download::DownloadItem::COMPLETE) {
     const auto path = item->GetTargetFilePath(); const auto url = item->GetURL();
@@ -278,7 +281,7 @@ void VideoStream::PartReady(base::FilePath path, GURL final_url) {
     worker_->PostTaskAndReplyWithResult(FROM_HERE,
         base::BindOnce([](base::FilePath path) { std::string text; base::ReadFileToStringWithMaxSize(path, &text, 2 * 1024 * 1024); return text; }, path),
         base::BindOnce(&VideoStream::Inspected, weak_factory_.GetWeakPtr(), final_url));
-  } else if (transport_stream_) {
+  } else if (TransportPart()) {
     worker_->PostTaskAndReplyWithResult(FROM_HERE,
         base::BindOnce(&ReadTransportPart, path),
         base::BindOnce(&VideoStream::TransmuxInput, weak_factory_.GetWeakPtr(), path));
@@ -371,11 +374,18 @@ void VideoStream::Inspected(GURL final_url, std::string body) {
         }, weak_factory_.GetWeakPtr(), final_url));
     return;
   }
-  auto playlist = ParseVideoPlaylist(body);
+  auto playlist = ParseVideoPlaylist(body, true);
   if (!playlist.error.empty()) { Fail(playlist.error.c_str()); return; }
+  if (!audio_manifest_.is_empty() && !playlist.variants.empty()) {
+    Fail("영상·음성 구간 대신 중첩된 재생 목록을 받았습니다. 제공 화질을 다시 선택해 주세요."); return;
+  }
   base::DictValue result; base::ListValue variants, parts;
   for (const auto& item : playlist.variants) {
-    base::DictValue row; row.Set("url", final_url.Resolve(item.address).spec()); row.Set("quality", item.quality); variants.Append(std::move(row));
+    base::DictValue row; row.Set("url", final_url.Resolve(item.address).spec()); row.Set("quality", item.quality);
+    if (!item.audio_address.empty()) {
+      row.Set("audioUrl", final_url.Resolve(item.audio_address).spec()); row.Set("audioLanguage", item.audio_language);
+    }
+    variants.Append(std::move(row));
   }
   result.Set("transportStream", playlist.variants.empty() && playlist.extension == ".ts");
   size_t address_bytes = 0;
@@ -387,8 +397,29 @@ void VideoStream::Inspected(GURL final_url, std::string body) {
     }
     parts.Append(address);
   }
-  result.Set("variants", std::move(variants)); result.Set("parts", std::move(parts));
+  if (!audio_manifest_.is_empty()) {
+    if (!inspecting_audio_) {
+      inspected_video_parts_ = std::move(parts);
+      inspected_video_transport_ = playlist.extension == ".ts";
+      inspecting_audio_ = true;
+      Fetch(audio_manifest_, directory_.AppendASCII("audio.m3u8"));
+      return;
+    }
+    if (inspected_video_parts_.size() + parts.size() > 20000) {
+      Fail("영상과 음성 구간의 합계가 지원 범위를 초과합니다."); return;
+    }
+    base::DictValue pair;
+    pair.Set("parts", std::move(inspected_video_parts_)); pair.Set("audioParts", std::move(parts));
+    pair.Set("transportStream", inspected_video_transport_);
+    pair.Set("audioTransportStream", playlist.extension == ".ts");
+    base::ListValue paired; paired.Append(std::move(pair)); result.Set("dashVariants", std::move(paired));
+  } else {
+    result.Set("variants", std::move(variants)); result.Set("parts", std::move(parts));
+  }
   FinishInspection(std::move(result));
+}
+bool VideoStream::TransportPart() const {
+  return completed_ < audio_start_ ? transport_stream_ : audio_transport_stream_;
 }
 void VideoStream::FinishInspection(base::DictValue result) {
   if (const auto* error = result.FindString("error")) { Fail(error->c_str()); return; }

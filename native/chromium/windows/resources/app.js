@@ -231,6 +231,35 @@ scanButton.addEventListener('click', async () => {
   } catch (error) { captureStatus.textContent = error.message || '영상을 검사하지 못했습니다.'; }
   finally { scanButton.disabled = false; }
 });
+const transferHistoryKey = 'video-transfer-dismissed-v1';
+function dismissedTransfers() {
+  try {
+    const value = JSON.parse(localStorage.getItem(transferHistoryKey) || '[]');
+    return new Set(Array.isArray(value) ? value.filter(id => typeof id === 'string' && id.length <= 200).slice(0, 10000) : []);
+  } catch { return new Set(); }
+}
+function dismissTransfers(items, guid = null) {
+  const dismissed = dismissedTransfers();
+  for (const item of items) {
+    if ([1, 2, 3].includes(item.state) && typeof item.guid === 'string' && item.guid.length <= 200 &&
+        (guid === null || guid === item.guid)) dismissed.add(item.guid);
+  }
+  if (dismissed.size > 10000) throw new Error('지울 수 있는 진행 기록 수를 초과했습니다.');
+  // Hide progress rows only. Chromium download records and saved media remain
+  // available to the library; never cancel a job or remove a file here.
+  localStorage.setItem(transferHistoryKey, JSON.stringify([...dismissed]));
+}
+async function clearTransferHistory(guid = null) {
+  try {
+    const result = await sendWithPromise('internetBrowserCapture', 'transfers');
+    if (result.error) throw new Error(result.error);
+    dismissTransfers(result.items || [], guid);
+    captureStatus.textContent = '진행 기록을 지웠습니다. 저장한 영상은 서재에 그대로 있습니다.';
+  } catch (error) { captureStatus.textContent = error.message || '진행 기록을 지우지 못했습니다.'; }
+  await refreshTransfers();
+}
+document.querySelector('#clear-video-transfers').addEventListener('click', () => clearTransferHistory());
+window.addEventListener('storage', event => { if (event.key === transferHistoryKey) refreshTransfers(); });
 let transfersLoading = false;
 let transferSummary = '';
 async function refreshTransfers() {
@@ -243,7 +272,10 @@ async function refreshTransfers() {
     if (transferSummary && summary !== transferSummary) await refreshLibrary();
     transferSummary = summary;
     const container = document.querySelector('#video-transfers'); container.replaceChildren();
-    for (const item of result.items) {
+    const dismissed = dismissedTransfers();
+    const visibleItems = result.items.filter(item => item.state === 0 || !dismissed.has(item.guid));
+    document.querySelector('#clear-video-transfers').disabled = !visibleItems.some(item => [1, 2, 3].includes(item.state));
+    for (const item of visibleItems) {
       const row = document.createElement('div'); row.className = 'video-transfer';
       const text = document.createElement('p');
       const states = ['다운로드 중', '완료', '취소됨', '중단됨'];
@@ -272,9 +304,15 @@ async function refreshTransfers() {
         });
         row.append(button);
       }
+      if ([1, 2, 3].includes(item.state)) {
+        const remove = document.createElement('button'); remove.className = 'secondary';
+        remove.textContent = '기록 지우기';
+        remove.addEventListener('click', async () => { remove.disabled = true; await clearTransferHistory(item.guid); });
+        row.append(remove);
+      }
       container.append(row);
     }
-    if (!result.items.length) container.textContent = '진행 중인 영상 다운로드가 없습니다.';
+    if (!visibleItems.length) container.textContent = '표시할 영상 다운로드 기록이 없습니다.';
   } catch { document.querySelector('#video-transfers').textContent = '다운로드 상태를 불러오지 못했습니다.'; }
   finally { transfersLoading = false; }
 }

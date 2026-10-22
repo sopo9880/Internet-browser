@@ -11,6 +11,9 @@
   };
   const title = (document.querySelector('meta[property="og:title"]')?.content || document.title || '영상').slice(0, 200);
   const protectedMedia = [...document.querySelectorAll('video')].some(v => v.mediaKeys);
+  const referrerPolicy = [...document.querySelectorAll('meta[name="referrer" i]')]
+    .map(meta => String(meta.content || '').trim().toLowerCase())
+    .filter(policy => ['no-referrer','same-origin','origin','strict-origin'].includes(policy)).at(-1) || '';
   function remote(address) {
     try {
       const url = new URL(address, document.baseURI);
@@ -23,7 +26,13 @@
     try { url = new URL(address, document.baseURI); } catch { return; }
     if (url.protocol === 'blob:') { reasons.add('이 영상은 브라우저 안에서 조합되는 스트림입니다. 원본 스트림을 확인해야 합니다.'); return; }
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return;
-    const mime = String(type).slice(0, 256).split(';')[0].trim().toLowerCase();
+    let mime = String(type).slice(0, 256).split(';')[0].trim().toLowerCase();
+    if (!mime) {
+      for (const key of ['mime', 'type', 'content_type']) {
+        const hint = url.searchParams.get(key)?.toLowerCase();
+        if (hint && /^(video\/[a-z0-9.+-]+|application\/(?:vnd\.apple\.mpegurl|x-mpegurl|dash\+xml))$/.test(hint)) { mime = hint; break; }
+      }
+    }
     const path = url.pathname.toLowerCase();
     let kind = /\.m3u8$/.test(path) || mime.includes('mpegurl') ? 'hls'
       : /\.mpd$/.test(path) || mime === 'application/dash+xml' ? 'dash' : 'file';
@@ -35,7 +44,7 @@
     const key = url.href + (audio ? '|'+audio.href : '');
     const previous = items.get(key);
     if (previous && (!quality || previous.quality)) return;
-    items.set(key, {url: url.href, audioUrl: audio?.href || '', title, kind, mime, quality: String(quality || '').slice(0, 80), source,
+    items.set(key, {url: url.href, audioUrl: audio?.href || '', title, kind, mime, quality: String(quality || '').slice(0, 80), source, referrerPolicy,
       ...(fileBytes(sizeBytes) ? {sizeBytes: fileBytes(sizeBytes), sizeEstimated: false} : {})});
   }
   for (const video of document.querySelectorAll('video')) {
@@ -93,8 +102,16 @@
         reasons.add('영상·음성의 직접 MP4 주소를 확인하지 못했습니다. 서명 처리나 지원하지 않는 형식이 필요할 수 있습니다.');
     }
     for (const [key, child] of Object.entries(value)) {
-      if (typeof child === 'string' && ['video_url', 'contentUrl', 'content_url'].includes(key)) add(child, 'video/mp4');
-      else if (child && typeof child === 'object') walk(child, depth + 1, budget);
+      if (typeof child === 'string') {
+        if (['video_url', 'videoUrl', 'contentUrl', 'content_url'].includes(key)) add(child, 'video/mp4');
+        else if (['hls', 'hlsUrl', 'hls_url'].includes(key)) add(child, 'application/vnd.apple.mpegurl');
+        else if (['dash', 'dashUrl', 'dash_url'].includes(key)) add(child, 'application/dash+xml');
+        else if (['file', 'src', 'url', 'manifestUrl', 'playbackUrl'].includes(key)) {
+          const type = typeof value.type === 'string' ? value.type : typeof value.mimeType === 'string' ? value.mimeType : '';
+          add(child, type);
+        }
+      }
+      else if (key !== 'streamingData' && child && typeof child === 'object') walk(child, depth + 1, budget);
     }
   }
   function embeddedPlayer(text) {

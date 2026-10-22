@@ -51,6 +51,12 @@ VIDEO_CAPTURE_CHECKS = {'capture_screen_and_quality_options', 'native_capture_do
     'invalid_transport_stream_not_registered', 'transport_processing_origin_isolated',
     'transmux_processor_released', 'active_transmux_browser_shutdown',
     'active_transmux_partial_cleanup'}
+VIDEO_CAPTURE_CHECKS |= {
+    'source_no_referrer_policy_preserved',
+    'progress_history_clear_preserves_saved_media', 'progress_history_dismissal_survives_hub_reload',
+    'generic_hls_pair_quality_and_audio', 'generic_hls_pair_audio_exact_bytes', 'generic_hls_pair_video_exact_bytes',
+    'generic_hls_mixed_pair_quality_and_audio', 'generic_hls_mixed_pair_audio_exact_bytes',
+    'generic_hls_mixed_pair_video_converted'}
 
 
 def require(condition: bool, message: str) -> None:

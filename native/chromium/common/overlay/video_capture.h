@@ -40,6 +40,7 @@ class VideoCapture : public base::SupportsUserData::Data, public ProfileObserver
     std::vector<GURL> parts;
     std::vector<GURL> audio_parts;
     bool transport_stream = false;
+    bool audio_transport_stream = false;
   };
   void Inspected(std::string token, Reply reply, base::DictValue result);
   void Scanned(content::WeakDocumentPtr document, base::Value value);

@@ -82,20 +82,20 @@ inline VideoPlaylist ParseVideoPlaylist(const std::string& text, bool separate_a
     } else if (line.starts_with("#EXT-X-MEDIA:")) {
       const auto attrs = PlaylistAttributes(line.substr(13));
       const auto type = attrs.find("TYPE");
-      if (type != attrs.end() && type->second == "AUDIO" && attrs.contains("URI")) {
-        if (!separate_audio) {
+      if (type != attrs.end() && type->second == "AUDIO") {
+        if (!separate_audio && attrs.contains("URI")) {
           result.error = "별도의 음성 트랙이 있는 HLS 영상은 합치기 지원이 필요합니다."; return result;
         }
         if (!attrs.contains("GROUP-ID") || attrs.at("GROUP-ID").empty() ||
-            attrs.at("GROUP-ID").size() > 256 || attrs.at("URI").empty() ||
-            attrs.at("URI").size() > 16384 || audio_groups.size() >= 60) {
+            attrs.at("GROUP-ID").size() > 256 ||
+            (attrs.contains("URI") && (attrs.at("URI").empty() || attrs.at("URI").size() > 16384)) || audio_groups.size() >= 60) {
           result.error = "음성 트랙 정보가 올바르지 않거나 지원 범위를 초과합니다."; return result;
         }
         const bool preferred = attrs.contains("DEFAULT") && attrs.at("DEFAULT") == "YES";
         const auto found = audio_groups.find(attrs.at("GROUP-ID"));
         if (found == audio_groups.end() || (!found->second.preferred && preferred)) {
           const auto language = attrs.contains("LANGUAGE") ? attrs.at("LANGUAGE").substr(0, 80) : std::string();
-          audio_groups[attrs.at("GROUP-ID")] = {attrs.at("URI"), language, preferred};
+          audio_groups[attrs.at("GROUP-ID")] = {attrs.contains("URI") ? attrs.at("URI") : std::string(), language, preferred};
         }
       }
     } else if (line.starts_with("#EXT-X-STREAM-INF:")) {

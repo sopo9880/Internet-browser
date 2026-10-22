@@ -450,6 +450,33 @@ cases display explicit reasons instead of pretending a playlist or video-only
 track is a completed offline movie. DRM decryption is not implemented. The
 installed development app and previous installer do not contain these changes.
 
+## Progress history and generic site compatibility
+
+The save screen provides per-row **기록 지우기** and **끝난 기록 모두 지우기**
+for completed, cancelled and interrupted transfers. This dismisses progress rows
+in the current profile's hub storage; it does not delete media, remove Chromium
+download records used by the library, or cancel active downloads. Dismissal
+survives reopening the hub. Active jobs remain visible even if a previously
+interrupted job is resumed elsewhere.
+
+Generic HLS inspection now resolves a declared default audio rendition along
+with the selected video rendition. Video and audio playlists retain separate
+container/conversion decisions, including MPEG-TS video with fragmented MP4
+audio. In-band audio declarations without a separate URI are supported too.
+Requests use the genuine source document as a conservatively sanitized referrer,
+respecting stricter response-header/meta policies. This addresses ordinary
+source-page hotlink checks without inventing a third-party referrer or disabling
+Chromium's download safety checks. Discovery also reads common JSON player source
+objects and explicit video/HLS/DASH MIME query parameters on extensionless URLs.
+
+These changes broaden the shared MP4/HLS/DASH path rather than adding a separate
+extractor for every site. They do not prove compatibility with every live site.
+Protected, incomplete and unsupported playlists still return explicit errors.
+The controlled native smoke includes default-audio HLS, mixed containers, genuine
+source-referrer checks, no-referrer preservation and history dismissal without
+media removal. A successful new packaged build and live-site acceptance remain
+required for this revision; older installed candidates do not contain it.
+
 ## Required before release
 
 The migration is in progress. Source transformations are not compilation;
