@@ -143,6 +143,15 @@ window.addEventListener('focus', refreshLibrary);
 await refreshLibrary();
 
 const captureStatus = document.querySelector('#capture-status');
+function videoSizeLabel(item) {
+  let amount = item.sizeBytes;
+  if (!Number.isFinite(amount) || amount <= 0 || amount > Number.MAX_SAFE_INTEGER) return '용량 미확인';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; ++unit; }
+  const text = amount.toLocaleString('ko-KR', {maximumFractionDigits: unit ? 1 : 0});
+  return `${item.sizeEstimated ? '약 ' : ''}${text} ${units[unit]}`;
+}
 const scanButton = document.querySelector('#scan-videos');
 scanButton.addEventListener('click', async () => {
   scanButton.disabled = true;
@@ -173,29 +182,40 @@ scanButton.addEventListener('click', async () => {
       const select = document.createElement('select'); select.setAttribute('aria-label', '저장할 영상과 화질');
       for (const [index, item] of items.entries()) {
         const option = document.createElement('option'); option.value = String(index);
-        option.textContent = `${item.quality || '원본 화질'} · ${item.paired ? '영상+음성 함께 저장' : item.convertedFromTs ? 'MPEG-TS → MP4' : item.kind === 'stream' ? '저장 가능한 MP4 스트림' : item.kind === 'file' ? (item.mime || '영상 파일') : item.kind.toUpperCase()} · ${index + 1}`;
+        option.textContent = `${item.quality || '원본 화질'} · ${videoSizeLabel(item)} · ${item.paired ? '영상+음성 함께 저장' : item.convertedFromTs ? 'MPEG-TS → MP4' : item.kind === 'stream' ? '저장 가능한 MP4 스트림' : item.kind === 'file' ? (item.mime || '영상 파일') : ['youtube', 'youtube_hls'].includes(item.kind) ? 'YouTube 영상' : item.kind.toUpperCase()} · ${index + 1}`;
         select.append(option);
       }
       const save = document.createElement('button'); save.textContent = '영상 저장';
-      const updateSaveLabel = () => { save.textContent = ['hls', 'dash'].includes(items[Number(select.value)].kind) ? '스트림 확인' : '영상 저장'; };
+      const updateSaveLabel = () => {
+        const kind = items[Number(select.value)].kind;
+        save.textContent = kind === 'youtube' ? '화질 가져오기' : ['hls', 'dash'].includes(kind) ? '스트림 확인' : '영상 저장';
+      };
       select.addEventListener('change', updateSaveLabel); updateSaveLabel();
       save.addEventListener('click', async () => {
         save.disabled = true;
         try {
           const selected = items[Number(select.value)];
-          if (['hls', 'dash'].includes(selected.kind)) {
+          if (['hls', 'dash', 'youtube', 'youtube_hls'].includes(selected.kind)) {
             captureStatus.textContent = '스트림 형식과 제공 화질을 확인하고 있습니다…';
             const response = await sendWithPromise('internetBrowserCapture', 'inspect', selected.token);
             if (response.error) throw new Error(response.error);
+            if (selected.kind === 'youtube_hls') {
+              const ready = response.items?.find(item => item.kind === 'stream');
+              if (!ready) throw new Error('이 화질의 영상과 음성을 준비하지 못했습니다. 화질을 다시 가져와 주세요.');
+              const download = await sendWithPromise('internetBrowserCapture', 'download', ready.token);
+              captureStatus.textContent = download.error || (download.started ? '다운로드를 시작했습니다. 완료되면 서재에 표시됩니다.' : '다운로드를 시작하지 못했습니다.');
+              await refreshTransfers();
+              return;
+            }
             for (const item of response.items || []) {
               const index = items.length; items.push(item);
               const option = document.createElement('option'); option.value = String(index);
-              option.textContent = `${item.quality || '원본 화질'} · ${item.paired ? '영상+음성 함께 저장' : item.convertedFromTs ? 'MPEG-TS → MP4' : item.kind === 'stream' ? '저장 가능한 MP4 스트림' : 'HLS 화질 선택'}${item.audioLanguage ? ` · 음성 ${item.audioLanguage}` : ''}`;
+              option.textContent = `${item.quality || '원본 화질'} · ${videoSizeLabel(item)} · ${item.paired ? '영상+음성 함께 저장' : item.convertedFromTs ? 'MPEG-TS → MP4' : item.kind === 'stream' ? '저장 가능한 MP4 스트림' : 'HLS 화질 선택'}${item.audioLanguage ? ` · 음성 ${item.audioLanguage}` : ''}`;
               select.append(option);
             }
             if (response.items?.length) {
               select.value = String(items.length - response.items.length); updateSaveLabel();
-              captureStatus.textContent = response.items.some(item => item.kind === 'stream') ? '저장 가능한 스트림입니다. 영상 저장을 눌러 주세요.' : '제공 화질을 선택한 뒤 스트림 확인을 눌러 주세요.';
+              captureStatus.textContent = response.items.some(item => ['stream', 'youtube_hls'].includes(item.kind)) ? '화질을 선택한 뒤 영상 저장을 눌러 주세요.' : '제공 화질을 선택한 뒤 스트림 확인을 눌러 주세요.';
             } else captureStatus.textContent = '저장 가능한 스트림을 찾지 못했습니다.';
             return;
           }
@@ -211,6 +231,35 @@ scanButton.addEventListener('click', async () => {
   } catch (error) { captureStatus.textContent = error.message || '영상을 검사하지 못했습니다.'; }
   finally { scanButton.disabled = false; }
 });
+const transferHistoryKey = 'video-transfer-dismissed-v1';
+function dismissedTransfers() {
+  try {
+    const value = JSON.parse(localStorage.getItem(transferHistoryKey) || '[]');
+    return new Set(Array.isArray(value) ? value.filter(id => typeof id === 'string' && id.length <= 200).slice(0, 10000) : []);
+  } catch { return new Set(); }
+}
+function dismissTransfers(items, guid = null) {
+  const dismissed = dismissedTransfers();
+  for (const item of items) {
+    if ([1, 2, 3].includes(item.state) && typeof item.guid === 'string' && item.guid.length <= 200 &&
+        (guid === null || guid === item.guid)) dismissed.add(item.guid);
+  }
+  if (dismissed.size > 10000) throw new Error('지울 수 있는 진행 기록 수를 초과했습니다.');
+  // Hide progress rows only. Chromium download records and saved media remain
+  // available to the library; never cancel a job or remove a file here.
+  localStorage.setItem(transferHistoryKey, JSON.stringify([...dismissed]));
+}
+async function clearTransferHistory(guid = null) {
+  try {
+    const result = await sendWithPromise('internetBrowserCapture', 'transfers');
+    if (result.error) throw new Error(result.error);
+    dismissTransfers(result.items || [], guid);
+    captureStatus.textContent = '진행 기록을 지웠습니다. 저장한 영상은 서재에 그대로 있습니다.';
+  } catch (error) { captureStatus.textContent = error.message || '진행 기록을 지우지 못했습니다.'; }
+  await refreshTransfers();
+}
+document.querySelector('#clear-video-transfers').addEventListener('click', () => clearTransferHistory());
+window.addEventListener('storage', event => { if (event.key === transferHistoryKey) refreshTransfers(); });
 let transfersLoading = false;
 let transferSummary = '';
 async function refreshTransfers() {
@@ -223,7 +272,10 @@ async function refreshTransfers() {
     if (transferSummary && summary !== transferSummary) await refreshLibrary();
     transferSummary = summary;
     const container = document.querySelector('#video-transfers'); container.replaceChildren();
-    for (const item of result.items) {
+    const dismissed = dismissedTransfers();
+    const visibleItems = result.items.filter(item => item.state === 0 || !dismissed.has(item.guid));
+    document.querySelector('#clear-video-transfers').disabled = !visibleItems.some(item => [1, 2, 3].includes(item.state));
+    for (const item of visibleItems) {
       const row = document.createElement('div'); row.className = 'video-transfer';
       const text = document.createElement('p');
       const states = ['다운로드 중', '완료', '취소됨', '중단됨'];
@@ -252,9 +304,15 @@ async function refreshTransfers() {
         });
         row.append(button);
       }
+      if ([1, 2, 3].includes(item.state)) {
+        const remove = document.createElement('button'); remove.className = 'secondary';
+        remove.textContent = '기록 지우기';
+        remove.addEventListener('click', async () => { remove.disabled = true; await clearTransferHistory(item.guid); });
+        row.append(remove);
+      }
       container.append(row);
     }
-    if (!result.items.length) container.textContent = '진행 중인 영상 다운로드가 없습니다.';
+    if (!visibleItems.length) container.textContent = '표시할 영상 다운로드 기록이 없습니다.';
   } catch { document.querySelector('#video-transfers').textContent = '다운로드 상태를 불러오지 못했습니다.'; }
   finally { transfersLoading = false; }
 }

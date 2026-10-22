@@ -28,6 +28,19 @@ test('unsafe schemes and embedded credentials cannot become candidates', () => {
     video('https://name:secret@example.test/a.mp4'), video('data:video/mp4,abc')]});
   assert.equal(result.items.length, 0);
 });
+test('generic player JSON and extensionless MIME endpoints expose HLS, DASH and video files', () => {
+  const result = scan({resources: [{name:'https://cdn.test/play?mime=video%2Fwebm'}], scripts:[{
+    type:'application/json', textContent:JSON.stringify({sources:[
+      {file:'https://cdn.test/playlist?id=7',type:'application/x-mpegURL'},
+      {src:'https://cdn.test/dash?id=7',type:'application/dash+xml'},
+      {url:'https://cdn.test/movie.webm'}, {url:'https://cdn.test/thumbnail.jpg'},
+      {hlsUrl:'https://cdn.test/hls?id=7'}, {dashUrl:'https://cdn.test/mpd?id=7'}
+    ]})}]});
+  assert.equal(result.items.length,6);
+  assert.equal(result.items.filter(item=>item.kind==='hls').length,2);
+  assert.equal(result.items.filter(item=>item.kind==='dash').length,2);
+  assert.ok(result.items.some(item=>item.url.includes('?mime=') && item.mime==='video/webm'));
+});
 test('DRM and unresolved blob media explain inability to save', () => {
   assert.equal(scan({videos: [video('https://cdn.test/drm.mp4', {mediaKeys: {}})]}).items.length, 0);
   const result = scan({videos: [video('blob:https://example.test/id')]});
@@ -81,4 +94,55 @@ test('unciphered YouTube adaptive MP4 formats retain the selected video and high
   const result=scan({scripts:[{type:'',textContent:'var ytInitialPlayerResponse = '+JSON.stringify(payload)+';'}]});
   assert.equal(result.items.length,1);assert.equal(result.items[0].kind,'pair');
   assert.equal(result.items[0].quality,'1080p');assert.equal(result.items[0].audioUrl,'https://cdn.test/a-high.m4a');
+});
+
+test('real YouTube pages use native public HLS discovery instead of unusable raw WEB URLs', () => {
+  const payload = {responseContext: {visitorData: 'anonymous-visitor'}, videoDetails:{videoId:'KMH4gUTuYJs'}, streamingData:{
+    formats:[{url:'https://rr1.googlevideo.com/videoplayback?n=unprocessed',mimeType:'video/mp4',qualityLabel:'360p'}],
+    adaptiveFormats:[{itag:299,mimeType:'video/mp4',qualityLabel:'1080p60'}],serverAbrStreamingUrl:'https://rr1.googlevideo.com/sabr'}};
+  const result = scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',
+    scripts:[{type:'',textContent:'var ytInitialPlayerResponse = '+JSON.stringify(payload)+';'}]});
+  assert.equal(result.items.length,1);assert.equal(result.items[0].kind,'youtube');
+  assert.equal(result.items[0].url,'https://www.youtube.com/watch?v=KMH4gUTuYJs');
+  assert.equal(result.items[0].visitorData,'anonymous-visitor');
+  assert.equal(result.items[0].quality,'제공 화질 확인');
+});
+
+test('visitor config is read as bounded JSON without executing script', () => {
+  const result=scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts:[{type:'',
+    textContent:'ytcfg.set({"VISITOR_DATA":"anonymous"}); throw new Error("never execute");'}]});
+  assert.equal(result.items[0].kind,'youtube');assert.equal(result.items[0].visitorData,'anonymous');
+  assert.equal(scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts:[{type:'',
+    textContent:JSON.stringify({VISITOR_DATA:'x'.repeat(4097)})}]}).items.length,0);
+});
+
+test('native YouTube discovery cannot be requested from lookalike hosts or DRM media', () => {
+  const scripts=[{type:'',textContent:'ytcfg.set({"VISITOR_DATA":"anonymous"});'}];
+  assert.equal(scan({baseURI:'https://www.youtube.com.attacker.test/watch?v=KMH4gUTuYJs',scripts}).items.length,0);
+  assert.equal(scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts,
+    videos:[video('blob:https://www.youtube.com/id',{mediaKeys:{}})]}).items.length,0);
+});
+
+test('native HLS size hints include audio and work without direct WEB URLs', () => {
+  const payload={responseContext:{visitorData:'anonymous'},videoDetails:{videoId:'KMH4gUTuYJs'},streamingData:{adaptiveFormats:[
+    {mimeType:'video/mp4; codecs="avc1.64002a"',qualityLabel:'1080p60',contentLength:'300000000'},
+    {mimeType:'video/mp4; codecs="av01"',qualityLabel:'1080p60',contentLength:'999999999'},
+    {mimeType:'video/mp4; codecs="avc1"',qualityLabel:'720p',contentLength:'-1'},
+    {mimeType:'audio/mp4; codecs="mp4a.40.2"',contentLength:'12000000',bitrate:128000}
+  ]}};
+  const result=scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts:[
+    {type:'',textContent:'var ytInitialPlayerResponse = '+JSON.stringify(payload)+';'}]});
+  assert.equal(result.items[0].sizeHints['1080p60'],312000000);
+  assert.equal(result.items[0].sizeHints['720p'],undefined);
+});
+
+test('direct pair sizes require both known file lengths and reject malformed lengths', () => {
+  function result(audioLength) {
+    return scan({scripts:[{type:'application/json',textContent:JSON.stringify({streamingData:{adaptiveFormats:[
+      {url:'https://cdn.test/v.mp4',mimeType:'video/mp4',qualityLabel:'1080p',contentLength:'1000'},
+      {url:'https://cdn.test/a.m4a',mimeType:'audio/mp4',contentLength:audioLength}
+    ]}})}]}).items[0];
+  }
+  assert.equal(result('200').sizeBytes,1200);assert.equal(result('200').sizeEstimated,false);
+  for(const invalid of [undefined,-1,true,'NaN','9007199254740992']) assert.equal(result(invalid).sizeBytes,undefined);
 });

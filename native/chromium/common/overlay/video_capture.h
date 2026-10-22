@@ -17,6 +17,7 @@
 class Profile;
 namespace internet_browser {
 class VideoStream;
+class YoutubeVideo;
 // UI-thread, profile-bound discovery. Renderer-supplied addresses are untrusted;
 // downloads retain their source frame and Chromium's ordinary security checks.
 class VideoCapture : public base::SupportsUserData::Data, public ProfileObserver {
@@ -39,6 +40,7 @@ class VideoCapture : public base::SupportsUserData::Data, public ProfileObserver
     std::vector<GURL> parts;
     std::vector<GURL> audio_parts;
     bool transport_stream = false;
+    bool audio_transport_stream = false;
   };
   void Inspected(std::string token, Reply reply, base::DictValue result);
   void Scanned(content::WeakDocumentPtr document, base::Value value);
@@ -46,6 +48,7 @@ class VideoCapture : public base::SupportsUserData::Data, public ProfileObserver
   raw_ptr<Profile> profile_;
   std::map<std::string, Candidate> candidates_;
   std::vector<std::unique_ptr<VideoStream>> streams_;
+  std::vector<std::unique_ptr<YoutubeVideo>> youtube_;
   base::ListValue found_;
   std::set<std::string> reasons_;
   Reply scan_reply_;

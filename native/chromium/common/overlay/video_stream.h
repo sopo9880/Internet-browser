@@ -21,10 +21,10 @@ namespace internet_browser {
 class VideoStream : public download::DownloadItem::Observer, public content::WebContentsObserver {
  public:
   using Reply = base::OnceCallback<void(base::DictValue)>;
-  VideoStream(Profile* profile, content::WeakDocumentPtr document, std::string title, std::string page);
+  VideoStream(Profile* profile, content::WeakDocumentPtr document, std::string title, std::string page, std::string referrer_policy = {});
   ~VideoStream() override;
-  void Inspect(GURL manifest, Reply reply, bool dash = false);
-  void Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts = {}, bool transport_stream = false);
+  void Inspect(GURL manifest, Reply reply, bool dash = false, GURL audio_manifest = GURL());
+  void Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts = {}, bool transport_stream = false, bool audio_transport_stream = false);
   base::DictValue Status() const;
   bool Control(const std::string& action);
   void Shutdown();
@@ -46,12 +46,18 @@ class VideoStream : public download::DownloadItem::Observer, public content::Web
   void Fail(const char* error);
   void Cleanup();
   void ReleaseProcessor();
+  bool TransportPart() const;
   raw_ptr<Profile> profile_;
   content::WeakDocumentPtr document_;
   GURL source_url_;
-  std::string title_, page_, id_, error_;
+  std::string title_, page_, id_, error_, referrer_policy_;
   base::FilePath directory_;
   std::vector<GURL> parts_;
+  GURL audio_manifest_;
+  base::ListValue inspected_video_parts_;
+  bool inspecting_audio_ = false;
+  bool inspected_video_transport_ = false;
+  bool audio_transport_stream_ = false;
   size_t completed_ = 0;
   size_t part_attempt_ = 0;
   size_t audio_start_ = 0;

@@ -61,6 +61,10 @@ def server(media: Path):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split('?')[0]
+            if 'guard=1' in self.path and self.headers.get('Referer') != self.base+'/hls-pair':
+                self.send_error(403); return
+            if route == '/privacy.mp4' and self.headers.get('Referer'):
+                self.send_error(403); return
             mime = 'text/html; charset=utf-8'
             body = b''
             if route in chunks: body, mime = chunks[route], 'video/mp4'
@@ -76,6 +80,16 @@ def server(media: Path):
                 mime = 'application/vnd.apple.mpegurl'
             elif route == '/ts.m3u8':
                 body = b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:2.76,\nclip.ts\n#EXT-X-ENDLIST\n'; mime = 'application/vnd.apple.mpegurl'
+            elif route in ['/paired-master.m3u8','/mixed-master.m3u8']:
+                video_list = 'paired-video.m3u8' if route == '/paired-master.m3u8' else 'ts.m3u8'
+                body = ('#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="main",DEFAULT=YES,LANGUAGE="ko",URI="paired-audio.m3u8?guard=1"\n'
+                        '#EXT-X-STREAM-INF:BANDWIDTH=600000,RESOLUTION=640x360,AUDIO="main"\n'+video_list+'?guard=1\n').encode()
+                mime = 'application/vnd.apple.mpegurl'
+            elif route in ['/paired-video.m3u8','/paired-audio.m3u8']:
+                track = 'v' if route == '/paired-video.m3u8' else 'a'
+                part = '000' if track == 'v' else '001'
+                body = f'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MAP:URI="dash-{track}-init.mp4?guard=1"\n#EXTINF:2.8,\ndash-{track}-{part}.m4s?guard=1\n#EXT-X-ENDLIST\n'.encode()
+                mime = 'application/vnd.apple.mpegurl'
             elif route == '/ts-slow.m3u8':
                 body = b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:2.76,\nclip.ts\n#EXTINF:2.76,\nslow-second.ts\n#EXT-X-ENDLIST\n'; mime = 'application/vnd.apple.mpegurl'
             elif route == '/encrypted.m3u8':
@@ -97,6 +111,10 @@ def server(media: Path):
                 body = '<title>Instagram 형식 테스트</title><meta property="og:video" content="/reel.mp4"><meta property="og:video:type" content="video/mp4">'.encode()
             elif route == '/hls':
                 body = b'<title>HLS fixture</title><video src="/master.m3u8"></video><video src="/encrypted.m3u8"></video>'
+            elif route == '/hls-pair':
+                body = b'<title>Generic HLS pair</title><video src="/paired-master.m3u8"></video><video src="/mixed-master.m3u8"></video>'
+            elif route == '/no-referrer':
+                body = b'<title>No referrer fixture</title><meta name="referrer" content="origin"><video src="/privacy.mp4"></video>'
             elif route == '/private': body = b'<title>Private fixture</title><video src="/private.webm"></video>'
             elif route == '/dash': body = b'<title>DASH fixture</title><video src="/dash.mpd"></video><video src="/dash-template.mpd"></video><video src="/dash-protected.mpd"></video><video src="/dash-external.mpd"></video><video src="/dash-empty-audio.mpd"></video>'
             elif route == '/ts-page': body = b'<title>TS fixture</title><video src="/ts.m3u8"></video><video src="/ts-slow.m3u8"></video><a download href="/clip.ts">direct</a><a download href="/bad.ts">invalid</a>'
@@ -105,6 +123,7 @@ def server(media: Path):
             self.send_response(200)
             self.send_header('Content-Type', mime)
             self.send_header('Content-Length', str(len(body)))
+            if route == '/no-referrer': self.send_header('Referrer-Policy', 'no-referrer')
             self.end_headers()
             if route.endswith('.m4s'): time.sleep(0.4)
             if route == '/slow-second.ts': time.sleep(2)
@@ -213,6 +232,13 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 checks['hls_cancel_not_in_library'] = len(list(profile.glob('*/InternetBrowserVideos/*/complete.json')))==1
                 def library():
                     return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserVideos");})()')
+                eventually(lambda: cdp.evaluate(hub, '!document.querySelector("#clear-video-transfers").disabled'))
+                cdp.evaluate(hub, 'document.querySelector("#clear-video-transfers").click()')
+                eventually(lambda: cdp.evaluate(hub, 'document.querySelectorAll("#video-transfers .video-transfer").length===0'))
+                checks['progress_history_clear_preserves_saved_media'] = completed[0].with_name('video.mp4').read_bytes()==video and bool(library()['videos'])
+                cdp.call('Page.navigate', {'url':'chrome://internet-browser/'}, session=hub)
+                eventually(lambda: cdp.evaluate(hub, 'document.querySelector("#video-transfers")?.textContent.includes("표시할")'))
+                checks['progress_history_dismissal_survives_hub_reload'] = cdp.evaluate(hub, 'document.querySelectorAll("#video-transfers .video-transfer").length===0')
                 catalog = eventually(library, lambda value: any(item.get('name','').startswith('stream:') for item in value.get('videos',[])))
                 saved = next(item for item in catalog['videos'] if item['name'].startswith('stream:'))
                 checks['hls_automatically_in_library'] = saved['title']=='HLS fixture'
@@ -280,6 +306,35 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 _, hub = open_page('chrome://internet-browser/')
                 durable = next(row for row in library()['videos'] if row['title']=='DASH fixture')
                 checks['dash_pair_survives_browser_restart'] = durable.get('audioUrl')==pair_row['audioUrl'] and durable['url']==pair_row['url']
+                open_page(base+'/no-referrer')
+                private_candidate = next(row for row in api('scan')['items'] if row['url'].endswith('/privacy.mp4'))
+                cdp.call('Browser.setDownloadBehavior', {'behavior':'allow','downloadPath':str(downloads)})
+                private_saved = api('download', private_candidate['token'])
+                if not private_saved.get('started'): raise RuntimeError(str(private_saved))
+                private_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==private_saved['guid'] and row['state'] in (1,3)),None))
+                checks['source_no_referrer_policy_preserved'] = private_status['state']==1
+                cdp.call('Browser.setDownloadBehavior', {'behavior':'default'})
+                open_page(base+'/hls-pair')
+                hls_found = api('scan')['items']
+                for suffix, label in [('/paired-master.m3u8','generic_hls_pair'),('/mixed-master.m3u8','generic_hls_mixed_pair')]:
+                    master = next(row for row in hls_found if row['url'].endswith(suffix))
+                    choices = api('inspect', master['token'])
+                    if choices.get('error'): raise RuntimeError(str(choices))
+                    choice = choices['items'][0]
+                    checks[label+'_quality_and_audio'] = choice.get('paired') is True and choice.get('audioLanguage')=='ko'
+                    plan = api('inspect', choice['token'])
+                    if plan.get('error'): raise RuntimeError(str(plan))
+                    saved = api('download', plan['items'][0]['token'])
+                    if not saved.get('started'): raise RuntimeError(str(saved))
+                    status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==saved['guid'] and row['state'] in (1,3)),None))
+                    if status['state']!=1: raise RuntimeError(str(status))
+                    marker = next(profile.glob('*/InternetBrowserVideos/stream-'+saved['guid'].split(':')[1]+'/complete.json'))
+                    checks[label+'_audio_exact_bytes'] = marker.with_name('audio.mp4').read_bytes()==dash_audio and json.loads(marker.read_text())['separateAudio'] is True
+                    if label=='generic_hls_pair':
+                        checks['generic_hls_pair_video_exact_bytes'] = marker.with_name('video.mp4').read_bytes()==dash_video
+                    else:
+                        converted = marker.with_name('video.mp4').read_bytes()
+                        checks['generic_hls_mixed_pair_video_converted'] = len(converted)>8 and converted[4:8]==b'ftyp'
                 open_page(base+'/ts-page')
                 _, hub = open_page('chrome://internet-browser/')
                 transport_candidates = api('scan')['items']
