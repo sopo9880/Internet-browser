@@ -115,7 +115,7 @@ def run(browser, work):
             eventually(lambda:evaluate("calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='location')"))
             checks['android_return_offers_install_retry_and_export_location'] = evaluate("!document.querySelector('#update-install').hidden&&!document.querySelector('#update-location').hidden&&!document.querySelector('#update-return-help').hidden")
             for label, width, height in [('desktop',1200,900),('mobile',390,844)]:
-                checks['video_downloadhelper_below_adblock'] = evaluate("(()=>{const cards=[...document.querySelectorAll('#panel-general article')];return cards[0]?.querySelector('h3')?.textContent==='AdBlock'&&cards[1]?.querySelector('h3')?.textContent==='Video DownloadHelper'&&cards[1].querySelector('a').href==='https://chromewebstore.google.com/detail/video-download-helper/lmjnegcaeklhafolokijcfjliaokphfk';})()")
+                checks['video_downloadhelper_below_adblock'] = evaluate("(()=>{const cards=[...document.querySelectorAll('#panel-general article')];return cards[0]?.querySelector('h3')?.textContent==='AdBlock'&&cards[1]?.querySelector('h3')?.textContent==='Video DownloadHelper'&&cards[1].querySelector('a').href==='https://chromewebstore.google.com/detail/video-download-helper/lmjnegcaeklhafolokijcfjliaokphfk'&&cards[1].querySelector('a').target==='_blank';})()")
                 cdp.call('Emulation.setDeviceMetricsOverride', {'width':width,'height':height,'deviceScaleFactor':1,'mobile':label=='mobile'}, session=session)
                 screenshot=cdp.call('Page.captureScreenshot', {'format':'png','captureBeyondViewport':True}, session=session)
                 (work/(label+'-settings.png')).write_bytes(base64.b64decode(screenshot['data']))

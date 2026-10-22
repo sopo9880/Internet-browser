@@ -261,8 +261,8 @@ void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
   if (item->IsDangerous() || item->IsInsecure()) {
     Fail("브라우저의 안전 검사로 영상 저장을 중단했습니다."); return;
   }
-  if (item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : TransportPart() ? 8LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
-      received_ + item->GetReceivedBytes() > 8.0 * 1024 * 1024 * 1024) {
+  if (!direct_file_ && (item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : TransportPart() ? 8LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
+      received_ + item->GetReceivedBytes() > 8.0 * 1024 * 1024 * 1024)) {
     Fail(inspect_ ? "재생 목록이 2 MB 제한을 초과했습니다." : TransportPart() ? "MPEG-TS 구간이 현재 변환 제한인 8 MB를 초과했습니다." : "영상·음성의 합계가 현재 저장 제한인 8 GB를 초과했습니다."); return;
   }
   if (item->GetState() == download::DownloadItem::COMPLETE) {
@@ -454,7 +454,7 @@ void VideoStream::Appended(bool success) {
   waiting_ = false;
   if (state_ != 0) { Cleanup(); return; }
   if (!success) { Fail("MP4 구간을 저장하지 못했습니다. 보호되거나 지원하지 않는 영상일 수 있습니다."); return; }
-  if (received_ > 8.0 * 1024 * 1024 * 1024) { Fail("영상이 현재 저장 크기 제한인 8 GB를 초과했습니다."); return; }
+  if (!direct_file_ && received_ > 8.0 * 1024 * 1024 * 1024) { Fail("영상이 현재 저장 크기 제한인 8 GB를 초과했습니다."); return; }
   ++completed_;
   if (completed_ == parts_.size()) {
     waiting_ = true;
@@ -482,8 +482,8 @@ base::DictValue VideoStream::Status() const {
   result.Set("inspection", inspect_);
   result.Set("isolatedProcessor", processor_isolated_);
   result.Set("state", state_); result.Set("paused", paused_); result.Set("blocked", false);
-  result.Set("canResume", state_ == 0 && paused_); result.Set("stream", true);
-  result.Set("pausing", paused_ && (observation_.IsObserving() || waiting_));
+  result.Set("canResume", state_ == 0 && paused_); result.Set("stream", !direct_file_);
+  result.Set("pausing", !direct_file_ && paused_ && (observation_.IsObserving() || waiting_));
   result.Set("completedParts", static_cast<int>(completed_)); result.Set("totalParts", static_cast<int>(parts_.size()));
   result.Set("received", received_ + (observation_.IsObserving() ? observation_.GetSource()->GetReceivedBytes() : 0));
   result.Set("total", direct_file_ && observation_.IsObserving() ? static_cast<double>(observation_.GetSource()->GetTotalBytes()) : 0); result.Set("error", error_); return result;
@@ -494,9 +494,16 @@ bool VideoStream::Control(const std::string& action) {
   // Pause between complete parts. Rapidly pausing an initializing download
   // stream can invalidate Chromium's data pipe before its first read; keeping
   // part downloads atomic also makes retries deterministic.
-  if (action == "pause") { paused_ = true; return true; }
+  if (action == "pause") {
+    paused_ = true;
+    if (direct_file_ && observation_.IsObserving()) observation_.GetSource()->Pause();
+    return true;
+  }
   if (action == "resume") {
     paused_ = false; error_.clear();
+    if (direct_file_ && observation_.IsObserving() && observation_.GetSource()->CanResume()) {
+      observation_.GetSource()->Resume(true); return true;
+    }
     if (observation_.IsObserving() && observation_.GetSource()->GetState() == download::DownloadItem::INTERRUPTED) {
       auto* item = observation_.GetSource(); observation_.Reset(); ForgetDownload(profile_, item, true);
     }
