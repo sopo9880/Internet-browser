@@ -68,6 +68,20 @@
     }
 
     @CalledByNative
+    private static boolean openInternetBrowserBrowserSettings() {
+        Context context = ContextUtils.getApplicationContext();
+        try {
+            Intent intent = new Intent();
+            intent.setClassName(context, "org.chromium.chrome.browser.settings.SettingsActivity");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+            return true;
+        } catch (SecurityException | ActivityNotFoundException error) {
+            return false;
+        }
+    }
+
+    @CalledByNative
     private static boolean showInternetBrowserUpdateFile(@JniType("std::string") String path) {
         Context context = ContextUtils.getApplicationContext();
         android.content.ContentResolver resolver = context.getContentResolver();

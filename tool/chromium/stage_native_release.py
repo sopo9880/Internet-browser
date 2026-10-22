@@ -52,11 +52,22 @@ VIDEO_CAPTURE_CHECKS = {'capture_screen_and_quality_options', 'native_capture_do
     'transmux_processor_released', 'active_transmux_browser_shutdown',
     'active_transmux_partial_cleanup'}
 VIDEO_CAPTURE_CHECKS |= {
+    'tab_picker_excludes_other_profile', 'native_scan_only_selected_tab', 'forged_tab_token_rejected',
+    'navigated_tab_token_rejected', 'saved_pair_reports_combined_size', 'non_library_file_delete_rejected',
+    'record_only_delete_preserves_media_bytes', 'pair_delete_removes_video_audio_and_completion_marker',
+    'pair_delete_preserves_other_saved_video', 'deleted_pair_disappears_from_library',
     'source_no_referrer_policy_preserved',
     'progress_history_clear_preserves_saved_media', 'progress_history_dismissal_survives_hub_reload',
     'generic_hls_pair_quality_and_audio', 'generic_hls_pair_audio_exact_bytes', 'generic_hls_pair_video_exact_bytes',
     'generic_hls_mixed_pair_quality_and_audio', 'generic_hls_mixed_pair_audio_exact_bytes',
     'generic_hls_mixed_pair_video_converted'}
+UPDATE_UI_CHECKS = {
+    'settings_tabs_switch_panels', 'selected_tab_only_requested',
+    'download_progress_shows_percent_and_byte_counts',
+    'android_verified_download_opens_security_screen',
+    'android_return_offers_install_retry_and_export_location',
+    'install_hidden_before_verification', 'install_shown_after_verification',
+    'hash_error_does_not_offer_install', 'cancel_never_requests_install', 'confirm_requests_install_once'}
 
 
 def require(condition: bool, message: str) -> None:
@@ -147,6 +158,12 @@ def validate_windows(source: Path, commit: str, tree: str) -> dict:
             capture.get('all_checks_passed') is True and 'error' not in capture and
             VIDEO_CAPTURE_CHECKS <= capture_checks.keys() and all(value is True for value in capture_checks.values()),
             'Packaged Windows video capture/stream smoke is missing, failed or from a different browser payload')
+    renderer = json.loads((source / 'update-ui-smoke.json').read_text(encoding='utf-8'))
+    renderer_checks = renderer.get('checks', {})
+    require(renderer.get('kind') == 'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE' and
+            renderer.get('chrome_exe_sha256') == files['chrome.exe'] and
+            UPDATE_UI_CHECKS <= renderer_checks.keys() and all(value is True for value in renderer_checks.values()),
+            'Settings/update renderer flow is missing, failed or from a different browser')
     return report
 
 
@@ -187,7 +204,8 @@ def stage(windows: Path, android: Path, output: Path, selection: dict,
             'windows-release-provenance.json': windows / 'native-provenance.json',
             'windows-runtime-provenance.json': windows / 'runtime-provenance.json',
             'windows-smoke.json': windows / 'windows-smoke.json',
-            'video-capture-smoke.json': windows / 'video-capture-smoke.json'}
+            'video-capture-smoke.json': windows / 'video-capture-smoke.json',
+            'update-ui-smoke.json': windows / 'update-ui-smoke.json'}
         copied = {}
         for name, source in names.items():
             target = temporary / name

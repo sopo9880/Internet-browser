@@ -63,6 +63,10 @@ class NativeReleaseStageTests(unittest.TestCase):
             'chrome_exe_sha256': files['chrome.exe'], 'chrome_dll_sha256': payload['chrome.dll'],
             'all_checks_passed': True, 'checks': dict.fromkeys(staging.VIDEO_CAPTURE_CHECKS, True),
             'live_youtube_instagram_verified': False})
+        self.write(directory / 'update-ui-smoke.json', {
+            'kind': 'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE',
+            'chrome_exe_sha256': files['chrome.exe'],
+            'checks': dict.fromkeys(staging.UPDATE_UI_CHECKS, True)})
         return report, runtime, smoke
 
     def android(self, directory):
@@ -161,6 +165,19 @@ class NativeReleaseStageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'signature'):
                     staging.validate_android(directory, METADATA, COMMIT, TREE, RUN_ID, Path('aapt2'), Path('apksigner'))
             verify.assert_called_once()
+
+    def test_update_renderer_gate_rejects_missing_progress_or_security_flow(self):
+        for field in ('download_progress_shows_percent_and_byte_counts',
+                      'android_verified_download_opens_security_screen',
+                      'settings_tabs_switch_panels'):
+            with self.subTest(field=field), TemporaryDirectory() as temporary:
+                directory = Path(temporary) / 'windows'; self.windows(directory)
+                path = directory / 'update-ui-smoke.json'
+                report = json.loads(path.read_text())
+                del report['checks'][field]
+                self.write(path, report)
+                with self.assertRaisesRegex(ValueError, 'renderer flow'):
+                    staging.validate_windows(directory, COMMIT, TREE)
 
     @patch.object(staging, 'verify_native_apk')
     def test_android_rejects_modified_apk_before_running_tools(self, verify):

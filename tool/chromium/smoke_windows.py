@@ -207,9 +207,10 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                         "document.querySelector('#transport-status')?.textContent"),
                         lambda value: bool(value) and '확인 중' not in value)
                     checks['native_product_webui'] = cdp.evaluate(page_session,
-                        "document.title === 'Internet Browser' && !!document.querySelector('#dpi-form')")
+                        "document.title === 'Internet Browser 설정' && !!document.querySelector('#dpi-form')")
                     eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Saved fixture'"))
-                    cdp.evaluate(page_session, "window.prompt = () => 'Renamed fixture'; document.querySelector('.rename-video').click()")
+                    cdp.evaluate(page_session, "document.querySelector('#tab-library').click();document.querySelector('.rename-video').click()")
+                    cdp.evaluate(page_session, "document.querySelector('dialog input').value='Renamed fixture';document.querySelector('dialog button[value=accept]').click()")
                     eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Renamed fixture'"))
                     checks['native_video_title_saved'] = eventually(lambda: saved_video().get('title')) == 'Renamed fixture'
                     checks['title_edit_preserves_legacy_position_fallback'] = 'lastPositionMs' not in saved_video()

@@ -286,7 +286,7 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
         text = replace_once(text,
             '    private GURL getDefaultHomepageGurlInternal(boolean isIncognito, boolean forZeroTabs) {\n',
             '    private GURL getDefaultHomepageGurlInternal(boolean isIncognito, boolean forZeroTabs) {\n'
-            '        if (!isIncognito) return new GURL("chrome://internet-browser/");\n')
+            '        if (!isIncognito) return new GURL("chrome://newtab/");\n')
         return replace_once(text, 'boolean defaultEnabled = !isDesktopExceptionEnabled();',
                             'boolean defaultEnabled = true;')
     update('chrome/android/java/src/org/chromium/chrome/browser/homepage/HomepageManager.java', homepage)

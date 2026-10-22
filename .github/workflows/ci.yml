@@ -229,6 +229,13 @@ jobs:
           NATIVE_CHROME_EXE: ${{ steps.native_runtime.outputs.chrome_exe }}
           NATIVE_MEDIA_DIRECTORY: ${{ steps.native_build.outputs.media_directory }}
         run: python tool/chromium/smoke_video_capture.py --exe "%NATIVE_CHROME_EXE%" --media "%NATIVE_MEDIA_DIRECTORY%" --report build/native-windows/video-capture-smoke.json --work build/native-video-capture-smoke
+      - name: Settings and update renderer flow (stub service, no OS installation)
+        shell: cmd
+        env:
+          NATIVE_CHROME_EXE: ${{ steps.native_runtime.outputs.chrome_exe }}
+        run: |
+          python tool/chromium/check_update_ui.py --browser "%NATIVE_CHROME_EXE%" --work build/native-update-ui-smoke || exit /b 1
+          copy build\native-update-ui-smoke\result.json build\native-windows\update-ui-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: native-windows-v022-development-not-release

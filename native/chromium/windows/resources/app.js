@@ -11,7 +11,14 @@ function showSettingsPanel(name, focus = false) {
   for (const panel of document.querySelectorAll('[data-settings-panel]'))
     panel.hidden = panel.dataset.settingsPanel !== name;
   history.replaceState(null, '', `#${name}`);
+  revealSelectedSettingsTab();
 }
+function revealSelectedSettingsTab() {
+  const selected = settingsTabs.find(tab => tab.getAttribute('aria-selected') === 'true');
+  if (selected && matchMedia('(max-width:760px)').matches)
+    selected.parentElement.scrollLeft = selected.offsetLeft - selected.parentElement.offsetLeft - 12;
+}
+window.addEventListener('resize', revealSelectedSettingsTab);
 for (const [index, tab] of settingsTabs.entries()) {
   tab.addEventListener('click', () => showSettingsPanel(tab.dataset.settingsTab));
   tab.addEventListener('keydown', event => {
@@ -25,10 +32,17 @@ for (const [index, tab] of settingsTabs.entries()) {
 }
 showSettingsPanel(location.hash.slice(1));
 window.addEventListener('hashchange', () => showSettingsPanel(location.hash.slice(1)));
+document.querySelector('#browser-settings').addEventListener('click', async () => {
+  try {
+    const result = await sendWithPromise('internetBrowserBrowserSettings');
+    if (!result.opened) throw new Error();
+  } catch { document.querySelector('#browser-settings-status').textContent = '상세 설정을 열지 못했습니다.'; }
+});
 
 // HTML dialogs work in both the independent Android settings surface and the
 // desktop settings window; they don't require a browsing Tab's dialog manager.
 function settingsDialog(message, initialText = null) {
+  if (document.querySelector('dialog')) return Promise.resolve(initialText === null ? false : null);
   return new Promise(resolve => {
     const dialog = document.createElement('dialog');
     const form = document.createElement('form'); form.method = 'dialog'; form.style.display = 'block';

@@ -3,7 +3,7 @@
 Does not download or execute any installer; native download/hash/OS acceptance
 is separate and must run against the product before release.
 """
-import argparse, json, subprocess, shutil, os
+import argparse, base64, hashlib, json, subprocess, shutil, os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.request import urlopen
@@ -50,8 +50,13 @@ def run(browser, work):
                 if(name==='internetBrowserCapture'&&args[0]==='scan')return {items:[],reasons:[]};
                 if(name==='internetBrowserDeleteVideo')return {deleted:true};
                 if(name==='internetBrowserUpdate'){
-                  if(args[0]==='check')return {available:true,canInstall:true,version:'0.3.0',tag:'v0.3.0',description:'<img src=x onerror=alert(1)>',releasePage:'https://github.com/sopo9880/Internet-browser/releases/tag/v0.3.0',android:false};
-                  if(args[0]==='download')return failDownload?{error:'SHA-256 mismatch'}:{verified:true};
+                  if(args[0]==='check')return {available:true,canInstall:true,version:'0.3.0',tag:'v0.3.0',description:'<img src=x onerror=alert(1)>',releasePage:'https://github.com/sopo9880/Internet-browser/releases/tag/v0.3.0',android:!!globalThis.androidUpdate};
+                  if(args[0]==='download') {
+                    if(globalThis.holdDownload)return new Promise(resolve=>{globalThis.finishUpdate=()=>resolve({verified:true});});
+                    return failDownload?{error:'SHA-256 mismatch'}:{verified:true};
+                  }
+                  if(args[0]==='progress')return globalThis.downloadProgress||{};
+                  if(['security','location','settings'].includes(args[0]))return {opened:true};
                   if(args[0]==='install')return {opened:true};
                 }
                 return {};
@@ -98,7 +103,23 @@ def run(browser, work):
             checks['hash_error_does_not_offer_install'] = evaluate("document.querySelector('#update-install').hidden")
             evaluate("document.querySelector('#update-snooze').click()")
             checks['snooze_is_tag_specific'] = evaluate("localStorage.getItem('update_snoozed_tag')==='v0.3.0'&&Number(localStorage.getItem('update_snoozed_until'))>Date.now()&&document.querySelector('#update-release').hidden")
+            evaluate("globalThis.androidUpdate=true;globalThis.failDownload=false;document.querySelector('#update-check').click()")
+            eventually(lambda:evaluate("!document.querySelector('#update-release').hidden&&!document.querySelector('#update-check').disabled"))
+            evaluate("globalThis.holdDownload=true;globalThis.downloadProgress={phase:'downloading',receivedBytes:52428800,totalBytes:104857600};document.querySelector('#update-download').click()")
+            eventually(lambda:evaluate("document.querySelector('#update-progress-label').textContent.includes('50%')"))
+            checks['download_progress_shows_percent_and_byte_counts'] = evaluate("document.querySelector('#update-progress').value===50&&document.querySelector('#update-progress-label').textContent.includes('50 MB / 100 MB')")
+            evaluate("globalThis.finishUpdate()")
+            eventually(lambda:evaluate("calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='security')&&!document.querySelector('#update-install').hidden"))
+            checks['android_verified_download_opens_security_screen'] = True
+            evaluate("window.dispatchEvent(new Event('focus'));document.querySelector('#update-location').click()")
+            eventually(lambda:evaluate("calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='location')"))
+            checks['android_return_offers_install_retry_and_export_location'] = evaluate("!document.querySelector('#update-install').hidden&&!document.querySelector('#update-location').hidden&&!document.querySelector('#update-return-help').hidden")
+            for label, width, height in [('desktop',1200,900),('mobile',390,844)]:
+                cdp.call('Emulation.setDeviceMetricsOverride', {'width':width,'height':height,'deviceScaleFactor':1,'mobile':label=='mobile'}, session=session)
+                screenshot=cdp.call('Page.captureScreenshot', {'format':'png','captureBeyondViewport':True}, session=session)
+                (work/(label+'-settings.png')).write_bytes(base64.b64decode(screenshot['data']))
             result={'kind':'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE','checks':checks,
+                    'chrome_exe_sha256':hashlib.sha256(browser.read_bytes()).hexdigest(),
                     'native_download_hash_verified':False,'native_download_library_verified':False,'installer_executed':False,'release_approved':False}
             if not all(checks.values()):raise RuntimeError(str(result))
             (work/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')

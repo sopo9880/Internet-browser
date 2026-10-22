@@ -177,9 +177,18 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 eventually(lambda: cdp.evaluate(hub, '!!document.querySelector("#scan-videos")'))
                 def api(command, *args):
                     return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserCapture",'+','.join(json.dumps(x) for x in (command,*args))+');})()')
+                tab_rows = api('tabs')['tabs']
+                source_tab = next(row for row in tab_rows if row['url']==base+'/generic')
+                checks['tab_picker_excludes_other_profile'] = not any(row['url']==base+'/private' for row in tab_rows)
+                cdp.evaluate(hub, 'document.querySelector("#capture-tab").value='+json.dumps(source_tab['token'])+';document.querySelector("#scan-videos").click()')
+                eventually(lambda: cdp.evaluate(hub, 'document.querySelectorAll("#capture-results article").length === 1'))
+                checks['capture_screen_and_quality_options'] = cdp.evaluate(hub, 'document.querySelector("#capture-results h3").textContent.includes("일반 영상")')
+                scoped = api('scan', source_tab['token'])
+                checks['native_scan_only_selected_tab'] = bool(scoped['items']) and all(row['page']==base+'/generic' for row in scoped['items'])
+                checks['forged_tab_token_rejected'] = bool(api('scan', 'not-a-browser-token').get('error'))
+                # Refill the UI with its own tokens after the direct API check.
                 cdp.evaluate(hub, 'document.querySelector("#scan-videos").click()')
-                eventually(lambda: cdp.evaluate(hub, 'document.querySelectorAll("#capture-results article").length >= 4'))
-                checks['capture_screen_and_quality_options'] = cdp.evaluate(hub, '[...document.querySelectorAll("#capture-results option")].some(option=>option.textContent.includes("360p"))')
+                eventually(lambda: cdp.evaluate(hub, '!document.querySelector("#scan-videos").disabled'))
                 cdp.evaluate(hub, '[...document.querySelectorAll("#capture-results article")].find(row=>row.querySelector("h3").textContent.includes("일반 영상")).querySelector("button").click()')
                 eventually(lambda: any(file.read_bytes()==webm for file in downloads.glob('*.webm')))
                 checks['native_capture_download_exact_bytes'] = True
@@ -254,6 +263,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 _, hub = open_page('chrome://internet-browser/')
                 stale = api('download', generic['token'])
                 checks['stale_source_document_rejected'] = bool(stale.get('error'))
+                checks['navigated_tab_token_rejected'] = bool(api('scan', source_tab['token']).get('error'))
                 open_page(base+'/dash')
                 discovered = api('scan')
                 yt_pair = next(row for row in discovered['items'] if row.get('paired') and row['page'].endswith('/youtube'))
@@ -306,6 +316,22 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 _, hub = open_page('chrome://internet-browser/')
                 durable = next(row for row in library()['videos'] if row['title']=='DASH fixture')
                 checks['dash_pair_survives_browser_restart'] = durable.get('audioUrl')==pair_row['audioUrl'] and durable['url']==pair_row['url']
+                checks['saved_pair_reports_combined_size'] = durable.get('sizeBytes') == pair_marker.with_name('video.mp4').stat().st_size + pair_marker.with_name('audio.mp4').stat().st_size
+                def delete_video(url, files):
+                    return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserDeleteVideo",'+json.dumps(url)+','+json.dumps(files)+');})()')
+                sentinel = profile/'Default'/'v024-delete-sentinel.txt'; sentinel.write_bytes(b'protected non-library fixture')
+                rejected = delete_video(sentinel.as_uri(), True)
+                checks['non_library_file_delete_rejected'] = bool(rejected.get('error')) and sentinel.read_bytes()==b'protected non-library fixture'
+                webm_files = {path:path.read_bytes() for path in downloads.glob('*.webm')}
+                assert webm_files and all(path.is_relative_to(root) for path in webm_files)
+                owned_urls = {path.as_uri() for path in webm_files}
+                webm_row = next(row for row in library()['videos'] if row['url'] in owned_urls)
+                hidden = delete_video(webm_row['url'], False)
+                checks['record_only_delete_preserves_media_bytes'] = hidden.get('deleted') is True and all(path.read_bytes()==data for path,data in webm_files.items()) and not any(row['url']==webm_row['url'] for row in library()['videos'])
+                erased = delete_video(durable['url'], True)
+                checks['pair_delete_removes_video_audio_and_completion_marker'] = erased.get('deleted') is True and all(not pair_marker.with_name(name).exists() for name in ('video.mp4','audio.mp4','complete.json'))
+                checks['pair_delete_preserves_other_saved_video'] = yt_marker.with_name('video.mp4').read_bytes()==dash_video and yt_marker.with_name('audio.mp4').read_bytes()==dash_audio
+                checks['deleted_pair_disappears_from_library'] = not any(row['url']==durable['url'] for row in library()['videos'])
                 open_page(base+'/no-referrer')
                 private_candidate = next(row for row in api('scan')['items'] if row['url'].endswith('/privacy.mp4'))
                 cdp.call('Browser.setDownloadBehavior', {'behavior':'allow','downloadPath':str(downloads)})

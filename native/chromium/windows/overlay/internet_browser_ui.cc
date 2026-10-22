@@ -43,6 +43,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
                                public content::DownloadManager::Observer {
  public:
   void RegisterMessages() override {
+    web_ui()->RegisterMessageCallback("internetBrowserBrowserSettings",
+        base::BindRepeating(&InternetBrowserHandler::BrowserSettings, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserNavigation",
         base::BindRepeating(&InternetBrowserHandler::Navigation, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserCapture",
@@ -94,6 +96,20 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
     }
   }
  private:
+  void BrowserSettings(const base::ListValue& args) {
+    if (args.size() != 1 || !args[0].is_string()) return;
+    AllowJavascript();
+    base::DictValue result;
+#if BUILDFLAG(IS_ANDROID)
+    result.Set("opened", static_cast<bool>(Java_PlatformUtil_openInternetBrowserBrowserSettings(
+        base::android::AttachCurrentThread())));
+    Reply(args[0].GetString(), std::move(result));
+#else
+    result.Set("opened", true); Reply(args[0].GetString(), std::move(result));
+    web_ui()->GetWebContents()->GetController().LoadURL(
+        GURL("chrome://settings/"), content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
+#endif
+  }
   void Reply(const std::string& id, base::DictValue data) {
     if (IsJavascriptAllowed())
       ResolveJavascriptCallback(base::Value(id), data);
