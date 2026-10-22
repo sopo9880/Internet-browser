@@ -65,6 +65,7 @@ VIDEO_CAPTURE_CHECKS |= {
     'generic_hls_mixed_pair_video_converted'}
 UPDATE_UI_CHECKS = {
     'video_downloadhelper_below_adblock',
+    'displayed_product_version_matches_manifest',
     'settings_tabs_switch_panels', 'selected_tab_only_requested',
     'download_progress_shows_percent_and_byte_counts',
     'android_verified_download_opens_security_screen',
