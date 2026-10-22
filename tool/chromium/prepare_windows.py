@@ -147,6 +147,10 @@ def overlay_path(checkout: Path, relative: str) -> Path:
         'chrome/browser/BUILD.gn',
         'chrome/browser/ui/webui/chrome_web_ui_configs.cc',
         'chrome/browser/ui/webui/BUILD.gn',
+        'chrome/browser/ui/chrome_pages.cc',
+        'chrome/browser/ui/BUILD.gn',
+        'chrome/browser/renderer_context_menu/render_view_context_menu.cc',
+        'chrome/browser/renderer_context_menu/BUILD.gn',
         'chrome/installer/mini_installer/chrome.release',
         'chrome/installer/mini_installer/BUILD.gn',
         'chrome/browser/internet_browser/ciadpi.exe',
@@ -318,17 +322,15 @@ def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
             '  ChromeBrowserMainParts::PostProfileInit(profile, is_initial_profile);\n'
             '  if (is_initial_profile) {\n'
             '    auto* settings = profile->GetPrefs();\n'
-            '    if (SessionStartupPref::TypeIsDefault(settings)) {\n'
-            '      SessionStartupPref startup(SessionStartupPref::URLS);\n'
-            '      startup.urls.emplace_back("chrome://internet-browser/");\n'
-            '      SessionStartupPref::SetStartupPref(profile, startup);\n'
+            '    auto startup = SessionStartupPref::GetStartupPref(profile);\n'
+            '    if (startup.type == SessionStartupPref::URLS && startup.urls.size() == 1 &&\n'
+            '        startup.urls[0] == GURL("chrome://internet-browser/")) {\n'
+            '      SessionStartupPref::SetStartupPref(profile, SessionStartupPref(SessionStartupPref::DEFAULT));\n'
             '    }\n'
-            '    if (settings->FindPreference(prefs::kHomePage)->IsDefaultValue()) {\n'
-            '      settings->SetString(prefs::kHomePage, "chrome://internet-browser/");\n'
-            '      settings->SetBoolean(prefs::kHomePageIsNewTabPage, false);\n'
+            '    if (settings->GetString(prefs::kHomePage) == "chrome://internet-browser/") {\n'
+            '      settings->SetString(prefs::kHomePage, "chrome://newtab/");\n'
+            '      settings->SetBoolean(prefs::kHomePageIsNewTabPage, true);\n'
             '    }\n'
-            '    if (settings->FindPreference(prefs::kShowHomeButton)->IsDefaultValue())\n'
-            '      settings->SetBoolean(prefs::kShowHomeButton, true);\n'
             '  }\n')
         text = replace_once(text,
             'void ChromeBrowserMainPartsWin::PostMainMessageLoopRun() {\n',
@@ -341,6 +343,74 @@ def prepare(checkout: Path, transport_directory: Path | None = None) -> dict:
         return replace_once(text, anchor,
             '  internet_browser::StartTransport();\n' + anchor)
     update('chrome/browser/chrome_browser_main_win.cc', integrate_main)
+    def settings_window(text):
+        text = replace_once(text, '#include "chrome/browser/ui/chrome_pages.h"\n',
+            '#include "chrome/browser/ui/chrome_pages.h"\n'
+            '#include "chrome/browser/ui/dialogs/browser_dialogs.h"\n'
+            '#include "ui/web_dialogs/web_dialog_delegate.h"\n')
+        return replace_once(text,
+            'void ShowSettings(BrowserWindowInterface* browser) {\n'
+            '  ShowSettingsSubPage(browser, std::string());\n}',
+            'void ShowSettings(BrowserWindowInterface* browser) {\n'
+            '  auto* dialog = new ui::WebDialogDelegate;\n'
+            '  dialog->set_dialog_title(u"Internet Browser 설정");\n'
+            '  dialog->set_dialog_content_url(GURL("chrome://internet-browser/"));\n'
+            '  dialog->set_dialog_size(gfx::Size(1040, 760));\n'
+            '  dialog->set_minimum_dialog_size(gfx::Size(480, 420));\n'
+            '  dialog->set_can_resize(true);\n'
+            '  ShowWebDialog(browser->GetWindow()->GetNativeWindow(),\n'
+            '                browser->GetProfile(), dialog);\n}')
+    update('chrome/browser/ui/chrome_pages.cc', settings_window)
+    update('chrome/browser/ui/BUILD.gn', lambda text: replace_once(text,
+        'group("ui_public_dependencies") {\n'
+        '  visibility = [ "//chrome/browser:browser_public_dependencies" ]\n'
+        '  public_deps = [\n',
+        'group("ui_public_dependencies") {\n'
+        '  visibility = [ "//chrome/browser:browser_public_dependencies" ]\n'
+        '  public_deps = [\n    "//ui/web_dialogs",\n'))
+    def context_video(text):
+        text = replace_once(text,
+            '#include "base/strings/escape.h"\n',
+            '#include "base/strings/escape.h"\n'
+            '#include "chrome/browser/ui/dialogs/browser_dialogs.h"\n'
+            '#include "ui/web_dialogs/web_dialog_delegate.h"\n')
+        old = ('    case IDC_CONTENT_CONTEXT_SAVEAVAS:\n'
+               '    case IDC_CONTENT_CONTEXT_SAVEPLUGINAS:\n'
+               '    case IDC_CONTENT_CONTEXT_SAVEIMAGEAS:\n')
+        replacement = '''    case IDC_CONTENT_CONTEXT_SAVEAVAS:
+      if (params_.media_type == ContextMenuDataMediaType::kVideo) {
+        auto* dialog = new ui::WebDialogDelegate;
+        dialog->set_dialog_title(u"영상 다운로드");
+        dialog->set_dialog_size(gfx::Size(1040, 760));
+        dialog->set_can_resize(true);
+        dialog->set_dialog_content_url(GURL("chrome://internet-browser/?source=" +
+            base::EscapeQueryParamValue(source_web_contents_->GetLastCommittedURL().spec(), true) +
+            "&media=" + base::EscapeQueryParamValue(params_.src_url.spec(), true) + "#video"));
+        chrome::ShowWebDialog(source_web_contents_->GetNativeView(), GetProfile(), dialog);
+      } else {
+        ExecSaveAs();
+      }
+      break;
+    case IDC_CONTENT_CONTEXT_SAVEPLUGINAS:
+    case IDC_CONTENT_CONTEXT_SAVEIMAGEAS:
+'''
+        text = replace_once(text, old, replacement)
+        text = replace_once(text,
+            '    case IDC_CONTENT_CONTEXT_SAVEAVAS:\n'
+            '    case IDC_CONTENT_CONTEXT_SAVEPLUGINAS:\n'
+            '      return IsSaveAsEnabled();',
+            '    case IDC_CONTENT_CONTEXT_SAVEAVAS:\n'
+            '      if (params_.media_type == ContextMenuDataMediaType::kVideo)\n'
+            '        return IsSaveAsItemAllowedByPolicy(params_.src_url) &&\n'
+            '               !(params_.media_flags & ContextMenuData::kMediaEncrypted);\n'
+            '      return IsSaveAsEnabled();\n'
+            '    case IDC_CONTENT_CONTEXT_SAVEPLUGINAS:\n'
+            '      return IsSaveAsEnabled();')
+        return text
+    update('chrome/browser/renderer_context_menu/render_view_context_menu.cc', context_video)
+    update('chrome/browser/renderer_context_menu/BUILD.gn', lambda text: replace_once(text,
+        '  deps = [\n    ":renderer_context_menu",\n',
+        '  deps = [\n    "//ui/web_dialogs",\n    ":renderer_context_menu",\n'))
     update('chrome/browser/BUILD.gn', lambda text: replace_once(text,
         '  if (is_win) {\n    sources += [\n      "chrome_browser_main_win.cc",',
         '  if (is_win) {\n'

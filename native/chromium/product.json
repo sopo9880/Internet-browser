@@ -1,7 +1,7 @@
 {
   "product_name": "Internet Browser",
   "product_id": "InternetBrowser",
-  "app_version": "0.2.3",
+  "app_version": "0.2.4",
   "chromium_version": "155.0.8059.84",
   "chromium_revision": "5869fe313571d75152b77813cf0a4ee26a4e6df0",
   "chromium_repository": "https://chromium.googlesource.com/chromium/src.git",

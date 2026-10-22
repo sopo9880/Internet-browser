@@ -15,6 +15,7 @@
 #include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/internet_browser/update_manifest.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/platform_util.h"
 #include "content/public/browser/storage_partition.h"
 #include "crypto/hash.h"
 #include "net/base/load_flags.h"
@@ -100,6 +101,15 @@ base::FilePath FinalizeInstaller(base::FilePath partial, base::DictValue install
 }
 }  // namespace
 NativeUpdater::NativeUpdater(Profile* profile) : profile_(profile) {}
+NativeUpdater* NativeUpdater::Get(Profile* profile) {
+  static constexpr char key[] = "internet-browser-updater";
+  auto* updater = static_cast<NativeUpdater*>(profile->GetUserData(key));
+  if (!updater) {
+    auto owned = std::make_unique<NativeUpdater>(profile); updater = owned.get();
+    profile->SetUserData(key, std::move(owned));
+  }
+  return updater;
+}
 NativeUpdater::~NativeUpdater() {
   loader_.reset();
   if (!keep_installer_ && !directory_.empty())
@@ -109,8 +119,6 @@ NativeUpdater::~NativeUpdater() {
 void NativeUpdater::Check(Reply reply) {
   if (busy_) {std::move(reply).Run(Error("다른 업데이트 작업이 진행 중입니다.")); return;}
   busy_ = true;
-  release_.clear();
-  verified_file_.clear();
   loader_ = Loader(GURL(kLatest));
   loader_->SetTimeoutDuration(base::Seconds(20));
   loader_->DownloadToString(profile_->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess().get(),
@@ -126,21 +134,34 @@ void NativeUpdater::ManifestReceived(Reply reply, std::optional<std::string> bod
   }
   auto manifest = body ? base::JSONReader::ReadDict(*body, base::JSON_PARSE_RFC) : std::nullopt;
   if (!manifest) {std::move(reply).Run(Error("공식 릴리스 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));return;}
-  release_ = ParseUpdateManifest(*manifest, kAppVersion, BUILDFLAG(IS_ANDROID));
+  auto next = ParseUpdateManifest(*manifest, kAppVersion, BUILDFLAG(IS_ANDROID));
+  const auto* previous = release_.FindDict("installer");
+  const auto* incoming = next.FindDict("installer");
+  if (!previous || !incoming || previous->FindString("sha256") == nullptr ||
+      incoming->FindString("sha256") == nullptr ||
+      *previous->FindString("sha256") != *incoming->FindString("sha256")) {
+    verified_file_.clear(); phase_ = "idle";
+  }
+  release_ = std::move(next);
   release_.Set("android", BUILDFLAG(IS_ANDROID));
   std::move(reply).Run(release_.Clone());
 }
 void NativeUpdater::Download(Reply reply) {
   const auto* installer = release_.FindDict("installer");
   if (busy_ || !installer) {std::move(reply).Run(Error("먼저 설치 가능한 공식 업데이트를 확인해 주세요."));return;}
+  if (!verified_file_.empty()) {
+    base::DictValue result; result.Set("verified", true); std::move(reply).Run(std::move(result)); return;
+  }
   busy_ = true;
+  received_bytes_ = 0;
+  phase_ = "downloading";
   verified_file_.clear();
   base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
       base::BindOnce(&CreateUpdateDirectory, profile_->GetPath()),
       base::BindOnce(&NativeUpdater::DownloadDirectoryReady, weak_factory_.GetWeakPtr(), std::move(reply)));
 }
 void NativeUpdater::DownloadDirectoryReady(Reply reply, base::FilePath directory) {
-  if (directory.empty()) {busy_ = false;std::move(reply).Run(Error("업데이트 저장 폴더를 만들지 못했습니다."));return;}
+  if (directory.empty()) {busy_ = false;phase_ = "failed";std::move(reply).Run(Error("업데이트 저장 폴더를 만들지 못했습니다."));return;}
   if (!keep_installer_ && !directory_.empty())
     base::ThreadPool::PostTask(FROM_HERE, {base::MayBlock()},
         base::BindOnce([](base::FilePath old) {base::DeletePathRecursively(old);}, directory_));
@@ -148,12 +169,17 @@ void NativeUpdater::DownloadDirectoryReady(Reply reply, base::FilePath directory
   keep_installer_ = false;
   const auto* installer = release_.FindDict("installer");
   loader_ = Loader(GURL(*installer->FindString("url")));
+  loader_->SetOnDownloadProgressCallback(base::BindRepeating(
+      [](base::WeakPtr<NativeUpdater> self, uint64_t received) {
+        if (self) self->received_bytes_ = received;
+      }, weak_factory_.GetWeakPtr()));
   loader_->DownloadToFile(profile_->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess().get(),
       base::BindOnce(&NativeUpdater::Downloaded, weak_factory_.GetWeakPtr(), std::move(reply)),
       directory.AppendASCII("installer.part"), *installer->FindInt("size"));
 }
 void NativeUpdater::Downloaded(Reply reply, base::FilePath file) {
   loader_.reset();
+  phase_ = file.empty() ? "failed" : "verifying";
   if (file.empty()) {busy_ = false;std::move(reply).Run(Error("업데이트 다운로드에 실패했습니다. 설치를 실행하지 않았습니다."));return;}
   base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
       base::BindOnce(&FinalizeInstaller, file, release_.FindDict("installer")->Clone()),
@@ -162,6 +188,8 @@ void NativeUpdater::Downloaded(Reply reply, base::FilePath file) {
 void NativeUpdater::Verified(Reply reply, base::FilePath file) {
   busy_ = false;
   verified_file_ = file;
+  phase_ = file.empty() ? "failed" : "ready";
+  if (!file.empty()) keep_installer_ = true;
   if (file.empty()) {std::move(reply).Run(Error("파일 크기 또는 SHA-256이 일치하지 않아 설치를 중단했습니다."));return;}
   base::DictValue result;result.Set("verified", true);std::move(reply).Run(std::move(result));
 }
@@ -197,5 +225,40 @@ bool NativeUpdater::OpenInstallSettings() {
 #else
   return false;
 #endif
+}
+bool NativeUpdater::OpenSecuritySettings() {
+#if BUILDFLAG(IS_ANDROID)
+  return Java_PlatformUtil_openInternetBrowserSecuritySettings(base::android::AttachCurrentThread());
+#else
+  return false;
+#endif
+}
+void NativeUpdater::OpenDownloadLocation(Reply reply) {
+  if (verified_file_.empty()) {
+    std::move(reply).Run(Error("검증된 설치 파일이 없습니다.")); return;
+  }
+#if BUILDFLAG(IS_ANDROID)
+  base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
+      base::BindOnce([](base::FilePath file, base::DictValue installer) {
+        return VerifyInstaller(file, installer) && Java_PlatformUtil_showInternetBrowserUpdateFile(
+            base::android::AttachCurrentThread(), file.value());
+      }, verified_file_, release_.FindDict("installer")->Clone()),
+      base::BindOnce([](Reply reply, bool opened) {
+        base::DictValue result; result.Set("opened", opened); std::move(reply).Run(std::move(result));
+      }, std::move(reply)));
+#else
+  platform_util::ShowItemInFolder(profile_, verified_file_);
+  base::DictValue result; result.Set("opened", true); std::move(reply).Run(std::move(result));
+#endif
+}
+base::DictValue NativeUpdater::Progress() const {
+  auto result = release_.Clone();
+  result.Set("phase", phase_);
+  result.Set("receivedBytes", static_cast<double>(received_bytes_));
+  const auto* installer = release_.FindDict("installer");
+  result.Set("totalBytes", installer ? installer->FindInt("size").value_or(0) : 0);
+  result.Set("verified", !verified_file_.empty());
+  if (!verified_file_.empty()) result.Set("fileName", verified_file_.BaseName().AsUTF8Unsafe());
+  return result;
 }
 }  // namespace internet_browser

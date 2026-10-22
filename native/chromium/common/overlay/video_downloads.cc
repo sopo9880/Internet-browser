@@ -125,7 +125,82 @@ base::DictValue ReadVideoLibraryWithDownloads(const base::FilePath& state,
   }
   // New downloads are already ordered newest first; retain every legacy row.
   for (auto& value : *videos) additions.Append(std::move(value));
+  additions.EraseIf([&](const auto& value) {
+    const auto* key = value.GetDict().FindString("name");
+    const auto* saved = key ? native.FindDict(*key) : nullptr;
+    return saved && saved->FindBool("hidden").value_or(false);
+  });
+  for (auto& value : additions) {
+    auto& row = value.GetDict();
+    const auto* url = row.FindString("url");
+    base::FilePath path;
+    if (url && net::FileURLToFilePath(GURL(*url), &path)) {
+      double size = static_cast<double>(base::GetFileSize(path).value_or(0));
+      if (const auto* audio = row.FindString("audioUrl"); audio && net::FileURLToFilePath(GURL(*audio), &path))
+        size += static_cast<double>(base::GetFileSize(path).value_or(0));
+      row.Set("sizeBytes", size);
+    }
+  }
   library.Set("videos", std::move(additions));
   return library;
+}
+base::DictValue DeleteLibraryVideo(const base::FilePath& state,
+                                  std::vector<CompletedVideoDownload> downloads,
+                                  const std::string& requested, bool delete_file) {
+  base::DictValue result;
+  // Resolve only an item from the current profile's completed library. Never
+  // accept a renderer-provided filesystem path or recursively remove a folder.
+  auto library = ReadVideoLibraryWithDownloads(state, downloads);
+  const auto* rows = library.FindList("videos");
+  if (!rows) return result;
+  for (const auto& value : *rows) {
+    const auto& row = value.GetDict();
+    const auto* url = row.FindString("url");
+    const auto* key = row.FindString("name");
+    if (!url || !key || *url != requested) continue;
+    if (delete_file) {
+      base::FilePath file;
+      for (const auto& download : downloads)
+        if (download.key == *key) { file = download.path; break; }
+      if (file.empty() && !net::FileURLToFilePath(GURL(*url), &file)) {
+        result.Set("error", "파일 위치를 확인하지 못했습니다."); return result;
+      }
+      if (base::IsLink(file) || base::IsLink(file.DirName())) {
+        result.Set("error", "연결된 파일은 삭제하지 않습니다."); return result;
+      }
+      if (key->starts_with("stream:")) {
+        const auto parent = state.DirName().AppendASCII("InternetBrowserVideos");
+        if (file.DirName().DirName() != parent || base::IsLink(parent) ||
+            file.BaseName().AsUTF8Unsafe() != "video.mp4" ||
+            *key != "stream:" + file.DirName().BaseName().AsUTF8Unsafe()) return result;
+        for (const char* name : {"video.mp4", "audio.mp4", "complete.json"}) {
+          const auto target = file.DirName().AppendASCII(name);
+          if (base::IsLink(target)) { result.Set("error", "연결된 파일은 삭제하지 않습니다."); return result; }
+        }
+        for (const char* name : {"video.mp4", "audio.mp4", "complete.json"}) {
+          const auto target = file.DirName().AppendASCII(name);
+          if (base::PathExists(target) && !base::DeleteFile(target)) {
+            result.Set("error", "일부 파일을 삭제하지 못했습니다. 재생을 종료한 뒤 다시 시도해 주세요."); return result;
+          }
+        }
+        base::DeleteFile(file.DirName());  // Empty directory only.
+      } else if (!base::DeleteFile(file)) {
+        result.Set("error", "파일을 삭제하지 못했습니다. 재생 또는 파일 권한을 확인해 주세요."); return result;
+      }
+    }
+    base::AutoLock lock(VideoStateLock());
+    auto catalog = ReadVideoState(state);
+    auto* entry = catalog.FindDict(*key);
+    auto saved = entry ? entry->Clone() : base::DictValue();
+    saved.Set("hidden", true); catalog.Set(*key, std::move(saved));
+    std::string serialized;
+    const bool stored = !state.empty() && base::JSONWriter::Write(catalog, &serialized) &&
+        serialized.size() <= 4 * 1024 * 1024 && base::ImportantFileWriter::WriteFileAtomically(state, serialized);
+    result.Set("deleted", stored); result.Set("fileDeleted", delete_file);
+    if (!stored) result.Set("error", "목록 변경을 저장하지 못했습니다.");
+    return result;
+  }
+  result.Set("error", "영상을 찾지 못했습니다. 목록을 새로고침해 주세요.");
+  return result;
 }
 }  // namespace internet_browser

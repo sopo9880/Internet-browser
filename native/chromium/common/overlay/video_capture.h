@@ -26,7 +26,8 @@ class VideoCapture : public base::SupportsUserData::Data, public ProfileObserver
   explicit VideoCapture(Profile* profile);
   ~VideoCapture() override;
   static VideoCapture* Get(Profile* profile);
-  void Scan(Reply reply);
+  base::DictValue Tabs();
+  void Scan(Reply reply, const std::string& tab_token = {});
   void Inspect(const std::string& token, Reply reply);
   void Download(const std::string& token, Reply reply);
   base::DictValue Transfers();
@@ -47,6 +48,7 @@ class VideoCapture : public base::SupportsUserData::Data, public ProfileObserver
   void FinishScan();
   raw_ptr<Profile> profile_;
   std::map<std::string, Candidate> candidates_;
+  std::map<std::string, content::WeakDocumentPtr> tab_documents_;
   std::vector<std::unique_ptr<VideoStream>> streams_;
   std::vector<std::unique_ptr<YoutubeVideo>> youtube_;
   base::ListValue found_;

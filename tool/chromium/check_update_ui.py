@@ -3,7 +3,7 @@
 Does not download or execute any installer; native download/hash/OS acceptance
 is separate and must run against the product before release.
 """
-import argparse, json, subprocess, shutil, os
+import argparse, base64, hashlib, json, subprocess, shutil, os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.request import urlopen
@@ -46,18 +46,28 @@ def run(browser, work):
                 if(name==='internetBrowserVideos')return {videos:[{title:videoTitle,url:'file:///controlled/sample.webm'},{title:'Scoped example',url:'content://media/external/downloads/42'}]};
                 if(name==='internetBrowserRenameVideo'){videoTitle=args[1].trim();return {saved:true,title:videoTitle};}
                 if(name==='internetBrowserOpenVideo')return {opened:true};
+                if(name==='internetBrowserCapture'&&args[0]==='tabs')return {tabs:[{token:'first',title:'First page',url:'https://example.test/one',active:true},{token:'second',title:'Second page',url:'https://example.test/two'}]};
+                if(name==='internetBrowserCapture'&&args[0]==='scan')return {items:[],reasons:[]};
+                if(name==='internetBrowserDeleteVideo')return {deleted:true};
                 if(name==='internetBrowserUpdate'){
-                  if(args[0]==='check')return {available:true,canInstall:true,version:'0.3.0',tag:'v0.3.0',description:'<img src=x onerror=alert(1)>',releasePage:'https://github.com/sopo9880/Internet-browser/releases/tag/v0.3.0',android:false};
-                  if(args[0]==='download')return failDownload?{error:'SHA-256 mismatch'}:{verified:true};
+                  if(args[0]==='check')return {available:true,canInstall:true,version:'0.3.0',tag:'v0.3.0',description:'<img src=x onerror=alert(1)>',releasePage:'https://github.com/sopo9880/Internet-browser/releases/tag/v0.3.0',android:!!globalThis.androidUpdate};
+                  if(args[0]==='download') {
+                    if(globalThis.holdDownload)return new Promise(resolve=>{globalThis.finishUpdate=()=>resolve({verified:true});});
+                    return failDownload?{error:'SHA-256 mismatch'}:{verified:true};
+                  }
+                  if(args[0]==='progress')return globalThis.downloadProgress||{};
+                  if(['security','location','settings'].includes(args[0]))return {opened:true};
                   if(args[0]==='install')return {opened:true};
                 }
                 return {};
               };''')
             source=(resources/'app.js').read_text(encoding='utf-8').split('\n',1)[1]
             evaluate('(async()=>{'+source+'\n})()')
-            evaluate("globalThis.prompt=()=>null;document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('dialog button[value=cancel]').click()")
             checks['rename_cancel_keeps_original'] = evaluate("!calls.some(x=>x[0]==='internetBrowserRenameVideo')&&document.querySelector('#videos button').textContent==='Saved example'")
-            evaluate("globalThis.prompt=()=>'<img src=x> 새 제목';document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('dialog input').value='<img src=x> 새 제목';document.querySelector('dialog button[value=accept]').click()")
             eventually(lambda:evaluate("document.querySelector('#videos button').textContent==='<img src=x> 새 제목'"))
             checks['renamed_title_is_literal'] = evaluate("!document.querySelector('#videos img')&&calls.some(x=>x[0]==='internetBrowserRenameVideo'&&x[1]==='file:///controlled/sample.webm')")
             evaluate("document.querySelector('#refresh-videos').click()")
@@ -65,7 +75,12 @@ def run(browser, work):
             checks['library_refresh_keeps_titles_without_duplicate_rows'] = evaluate("document.querySelectorAll('#videos li').length===2 && document.querySelector('#videos button').textContent==='<img src=x> 새 제목'")
             evaluate("[...document.querySelectorAll('#videos button')].find(x=>x.textContent==='Scoped example').click()")
             checks['scoped_uri_is_passed_to_native_lookup'] = evaluate("calls.some(x=>x[0]==='internetBrowserOpenVideo'&&x[1]==='content://media/external/downloads/42')")
-            checks['legacy_auto_check_choice'] = evaluate("!document.querySelector('#update-auto').checked && !calls.some(x=>x[0]==='internetBrowserUpdate')")
+            checks['legacy_auto_check_choice'] = evaluate("!document.querySelector('#update-auto').checked && !calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='check')")
+            evaluate("document.querySelector('#tab-video').click();document.querySelector('#capture-tab').value='second';document.querySelector('#scan-videos').click()")
+            eventually(lambda:evaluate("calls.some(x=>x[0]==='internetBrowserCapture'&&x[1]==='scan'&&x[2]==='second')"))
+            checks['selected_tab_only_requested'] = True
+            checks['settings_tabs_switch_panels'] = evaluate("!document.querySelector('#panel-video').hidden&&document.querySelector('#panel-general').hidden&&document.querySelector('#tab-video').getAttribute('aria-selected')==='true'")
+            evaluate("document.querySelector('#tab-updates').click()")
             evaluate("document.querySelector('#update-check').click()")
             eventually(lambda:evaluate("!document.querySelector('#update-release').hidden"))
             checks['notes_are_literal'] = evaluate("document.querySelector('#update-notes').textContent === '<img src=x onerror=alert(1)>' && !document.querySelector('#update-notes img')")
@@ -75,7 +90,10 @@ def run(browser, work):
             checks['install_shown_after_verification'] = True
             evaluate("document.querySelector('#update-install').click()")
             checks['cancel_never_requests_install'] = evaluate("!calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='install')")
-            evaluate("globalThis.confirm=()=>true;document.querySelector('#update-install').click()")
+            evaluate("document.querySelector('dialog button[value=cancel]').click()")
+            eventually(lambda:evaluate("!document.querySelector('dialog')"))
+            evaluate("document.querySelector('#update-install').click()")
+            evaluate("document.querySelector('dialog button[value=accept]').click()")
             eventually(lambda:evaluate("calls.filter(x=>x[0]==='internetBrowserUpdate'&&x[1]==='install').length===1"))
             checks['confirm_requests_install_once'] = True
             evaluate("document.querySelector('#update-check').click()")
@@ -85,7 +103,26 @@ def run(browser, work):
             checks['hash_error_does_not_offer_install'] = evaluate("document.querySelector('#update-install').hidden")
             evaluate("document.querySelector('#update-snooze').click()")
             checks['snooze_is_tag_specific'] = evaluate("localStorage.getItem('update_snoozed_tag')==='v0.3.0'&&Number(localStorage.getItem('update_snoozed_until'))>Date.now()&&document.querySelector('#update-release').hidden")
+            evaluate("globalThis.androidUpdate=true;globalThis.failDownload=false;document.querySelector('#update-check').click()")
+            eventually(lambda:evaluate("!document.querySelector('#update-release').hidden&&!document.querySelector('#update-check').disabled"))
+            evaluate("globalThis.holdDownload=true;globalThis.downloadProgress={phase:'downloading',receivedBytes:52428800,totalBytes:104857600};document.querySelector('#update-download').click()")
+            eventually(lambda:evaluate("document.querySelector('#update-progress-label').textContent.includes('50%')"))
+            checks['download_progress_shows_percent_and_byte_counts'] = evaluate("document.querySelector('#update-progress').value===50&&document.querySelector('#update-progress-label').textContent.includes('50 MB / 100 MB')")
+            evaluate("globalThis.finishUpdate()")
+            eventually(lambda:evaluate("calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='security')&&!document.querySelector('#update-install').hidden"))
+            checks['android_verified_download_opens_security_screen'] = True
+            evaluate("window.dispatchEvent(new Event('focus'));document.querySelector('#update-location').click()")
+            eventually(lambda:evaluate("calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='location')"))
+            checks['android_return_offers_install_retry_and_export_location'] = evaluate("!document.querySelector('#update-install').hidden&&!document.querySelector('#update-location').hidden&&!document.querySelector('#update-return-help').hidden")
+            for label, width, height in [('desktop',1200,900),('mobile',390,844)]:
+                cdp.call('Emulation.setDeviceMetricsOverride', {'width':width,'height':height,'deviceScaleFactor':1,'mobile':label=='mobile'}, session=session)
+                screenshot=cdp.call('Page.captureScreenshot', {'format':'png','captureBeyondViewport':True}, session=session)
+                (work/(label+'-settings.png')).write_bytes(base64.b64decode(screenshot['data']))
             result={'kind':'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE','checks':checks,
+                    'chrome_exe_sha256':hashlib.sha256(browser.read_bytes()).hexdigest(),
+                    'chrome_dll_sha256':hashlib.sha256(browser.with_name('chrome.dll').read_bytes()).hexdigest(),
+                    'renderer_sources':{name:hashlib.sha256((resources/name).read_bytes()).hexdigest()
+                                        for name in ('index.html','app.js','style.css')},
                     'native_download_hash_verified':False,'native_download_library_verified':False,'installer_executed':False,'release_approved':False}
             if not all(checks.values()):raise RuntimeError(str(result))
             (work/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')

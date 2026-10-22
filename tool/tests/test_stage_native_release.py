@@ -13,7 +13,7 @@ from tool.chromium import stage_native_release as staging
 COMMIT = 'c' * 40
 TREE = 'b' * 40
 RUN_ID = 44
-METADATA = parse_pubspec('version: 0.2.3+1\n')
+METADATA = parse_pubspec('version: ' + staging.PRODUCT['app_version'] + '+1\n')
 
 
 class NativeReleaseStageTests(unittest.TestCase):
@@ -63,6 +63,13 @@ class NativeReleaseStageTests(unittest.TestCase):
             'chrome_exe_sha256': files['chrome.exe'], 'chrome_dll_sha256': payload['chrome.dll'],
             'all_checks_passed': True, 'checks': dict.fromkeys(staging.VIDEO_CAPTURE_CHECKS, True),
             'live_youtube_instagram_verified': False})
+        self.write(directory / 'update-ui-smoke.json', {
+            'kind': 'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE',
+            'chrome_exe_sha256': files['chrome.exe'],
+            'chrome_dll_sha256': payload['chrome.dll'],
+            'renderer_sources':{name:staging.sha256(staging.ROOT / 'native/chromium/windows/resources' / name)
+                                for name in ('index.html', 'app.js', 'style.css')},
+            'checks': dict.fromkeys(staging.UPDATE_UI_CHECKS, True)})
         return report, runtime, smoke
 
     def android(self, directory):
@@ -162,6 +169,19 @@ class NativeReleaseStageTests(unittest.TestCase):
                     staging.validate_android(directory, METADATA, COMMIT, TREE, RUN_ID, Path('aapt2'), Path('apksigner'))
             verify.assert_called_once()
 
+    def test_update_renderer_gate_rejects_missing_progress_or_security_flow(self):
+        for field in ('download_progress_shows_percent_and_byte_counts',
+                      'android_verified_download_opens_security_screen',
+                      'settings_tabs_switch_panels'):
+            with self.subTest(field=field), TemporaryDirectory() as temporary:
+                directory = Path(temporary) / 'windows'; self.windows(directory)
+                path = directory / 'update-ui-smoke.json'
+                report = json.loads(path.read_text())
+                del report['checks'][field]
+                self.write(path, report)
+                with self.assertRaisesRegex(ValueError, 'renderer flow'):
+                    staging.validate_windows(directory, COMMIT, TREE)
+
     @patch.object(staging, 'verify_native_apk')
     def test_android_rejects_modified_apk_before_running_tools(self, verify):
         with TemporaryDirectory() as temporary:
@@ -185,7 +205,7 @@ class NativeReleaseStageTests(unittest.TestCase):
             self.assertFalse(source_inputs['complete_corresponding_source_included'])
             for notice in source_inputs['upstream_notices']:
                 self.assertEqual(staging.sha256(output / ('upstream-' + notice['file'])), notice['sha256'])
-            self.assertEqual((windows / 'mini_installer.exe').read_bytes(), (output / 'Internet-browser-Windows-Setup-v0.2.3.exe').read_bytes())
+            self.assertEqual((windows / 'mini_installer.exe').read_bytes(), (output / f'Internet-browser-Windows-Setup-v{METADATA.version}.exe').read_bytes())
             for line in (output / 'SHA256SUMS.txt').read_text().splitlines():
                 digest, name = line.split('  ', 1)
                 self.assertEqual(digest, staging.sha256(output / name))

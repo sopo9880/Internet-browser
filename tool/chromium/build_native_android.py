@@ -184,6 +184,9 @@ def build(workspace: Path, stage: Path, version_code: int, jobs: int,
                 vpython = depot / '.cipd_bin/vpython3'
                 run(vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowserAndroid', '-j', str(jobs), *PRODUCT_OBJECTS)
                 report['product_objects_compiled'] = True
+                run(vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowserAndroid', '-j', str(jobs),
+                    'obj/chrome/android/chrome_java.javac.jar')
+                report['product_java_compiled'] = True
                 if not product_objects_only:
                     run(vpython, depot / 'autoninja.py', '-C', 'out/InternetBrowserAndroid', '-j', str(jobs), 'chrome_public_apk')
                     apk = source / 'out/InternetBrowserAndroid/apks/ChromePublic.apk'

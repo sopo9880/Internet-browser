@@ -19,5 +19,8 @@ std::vector<CompletedVideoDownload> CollectVideoDownloads(content::BrowserContex
 base::DictValue ReadVideoLibraryWithDownloads(const base::FilePath& state,
                                              std::vector<CompletedVideoDownload> downloads,
                                              bool private_session = false);
+base::DictValue DeleteLibraryVideo(const base::FilePath& state,
+                                  std::vector<CompletedVideoDownload> downloads,
+                                  const std::string& requested, bool delete_file);
 }
 #endif

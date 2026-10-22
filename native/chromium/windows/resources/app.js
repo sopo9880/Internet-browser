@@ -1,5 +1,71 @@
 import {sendWithPromise} from 'chrome://resources/js/cr.js';
 
+const settingsTabs = [...document.querySelectorAll('[data-settings-tab]')];
+function showSettingsPanel(name, focus = false) {
+  if (!settingsTabs.some(tab => tab.dataset.settingsTab === name)) name = 'general';
+  for (const tab of settingsTabs) {
+    const selected = tab.dataset.settingsTab === name;
+    tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1;
+    if (selected && focus) tab.focus();
+  }
+  for (const panel of document.querySelectorAll('[data-settings-panel]'))
+    panel.hidden = panel.dataset.settingsPanel !== name;
+  history.replaceState(null, '', `#${name}`);
+  revealSelectedSettingsTab();
+}
+function revealSelectedSettingsTab() {
+  const selected = settingsTabs.find(tab => tab.getAttribute('aria-selected') === 'true');
+  if (selected && matchMedia('(max-width:760px)').matches)
+    selected.parentElement.scrollLeft = selected.offsetLeft - selected.parentElement.offsetLeft - 12;
+}
+window.addEventListener('resize', revealSelectedSettingsTab);
+for (const [index, tab] of settingsTabs.entries()) {
+  tab.addEventListener('click', () => showSettingsPanel(tab.dataset.settingsTab));
+  tab.addEventListener('keydown', event => {
+    let next;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % settingsTabs.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index + settingsTabs.length - 1) % settingsTabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = settingsTabs.length - 1;
+    if (next !== undefined) { event.preventDefault(); showSettingsPanel(settingsTabs[next].dataset.settingsTab, true); }
+  });
+}
+showSettingsPanel(location.hash.slice(1));
+window.addEventListener('hashchange', () => showSettingsPanel(location.hash.slice(1)));
+document.querySelector('#browser-settings').addEventListener('click', async () => {
+  try {
+    const result = await sendWithPromise('internetBrowserBrowserSettings');
+    if (!result.opened) throw new Error();
+  } catch { document.querySelector('#browser-settings-status').textContent = '상세 설정을 열지 못했습니다.'; }
+});
+
+// HTML dialogs work in both the independent Android settings surface and the
+// desktop settings window; they don't require a browsing Tab's dialog manager.
+function settingsDialog(message, initialText = null) {
+  if (document.querySelector('dialog')) return Promise.resolve(initialText === null ? false : null);
+  return new Promise(resolve => {
+    const dialog = document.createElement('dialog');
+    const form = document.createElement('form'); form.method = 'dialog'; form.style.display = 'block';
+    const text = document.createElement('p'); text.textContent = message; form.append(text);
+    let input;
+    if (initialText !== null) {
+      input = document.createElement('input'); input.type = 'text'; input.value = initialText;
+      input.maxLength = 180; input.setAttribute('aria-label', '영상 제목'); form.append(input);
+    }
+    const buttons = document.createElement('div'); buttons.className = 'dialog-buttons';
+    for (const [label, value] of [['취소', 'cancel'], ['확인', 'accept']]) {
+      const button = document.createElement('button'); button.textContent = label; button.value = value;
+      if (value === 'cancel') button.className = 'secondary'; buttons.append(button);
+    }
+    form.append(buttons); dialog.append(form); document.body.append(dialog);
+    dialog.addEventListener('close', () => {
+      const accepted = dialog.returnValue === 'accept'; const value = input?.value;
+      dialog.remove(); resolve(initialText === null ? accepted : accepted ? value : null);
+    }, {once: true});
+    dialog.showModal();
+  });
+}
+
 const enabled = document.querySelector('#enabled');
 const preset = document.querySelector('#preset');
 const transportStatus = document.querySelector('#transport-status');
@@ -107,14 +173,42 @@ document.querySelector('#import-bookmarks').addEventListener('click', async even
   }
 });
 let libraryLoading = false;
+let deletingVideos = false;
+const selectedVideos = new Map();
+async function deleteLibraryVideos(videos, deleteFiles) {
+  if (deletingVideos || !videos.length) return;
+  const total = videos.reduce((sum, video) => sum + (video.sizeBytes || 0), 0);
+  const names = videos.slice(0, 8).map(video => video.title).join('\n');
+  if (!await settingsDialog(`${deleteFiles ? '실제 영상 파일을 삭제합니다. 되돌릴 수 없습니다.' : '서재 기록만 지웁니다. 영상 파일은 유지됩니다.'}\n${videos.length}개 · ${videoSizeLabel({sizeBytes: total})}\n\n${names}${videos.length > 8 ? '\n…' : ''}\n\n계속하시겠습니까?`)) return;
+  deletingVideos = true;
+  let completed = 0; const errors = [];
+  try {
+    for (const video of videos) {
+      const result = await sendWithPromise('internetBrowserDeleteVideo', video.url, deleteFiles);
+      if (result.deleted) ++completed; else errors.push(result.error || '삭제하지 못했습니다.');
+    }
+  } catch { errors.push('삭제 요청에 실패했습니다.'); }
+  finally {
+    deletingVideos = false; await refreshLibrary();
+    document.querySelector('#video-status').textContent = `${completed}개 ${deleteFiles ? '파일 삭제' : '기록 삭제'} 완료${errors.length ? ` · ${errors[0]}` : ''}`;
+  }
+}
+document.querySelector('#select-all-videos').addEventListener('click', () => {
+  const boxes = [...document.querySelectorAll('.select-video:not(:disabled)')];
+  const checked = boxes.some(box => !box.checked);
+  for (const box of boxes) { box.checked = checked; box.dispatchEvent(new Event('change')); }
+});
+document.querySelector('#hide-selected-videos').addEventListener('click', () => deleteLibraryVideos([...selectedVideos.values()], false));
+document.querySelector('#delete-selected-videos').addEventListener('click', () => deleteLibraryVideos([...selectedVideos.values()], true));
 async function refreshLibrary() {
-if (libraryLoading) return;
+if (libraryLoading || deletingVideos) return;
 libraryLoading = true;
 document.querySelector('#refresh-videos').disabled = true;
 try {
   const library = await sendWithPromise('internetBrowserVideos');
   if (library.error) throw new Error(library.error);
   document.querySelector('#videos').replaceChildren();
+  selectedVideos.clear();
   document.querySelector('#video-status').textContent = library.videos.length
     ? `${library.videos.length}개의 저장된 영상` : '저장된 영상이 없습니다.';
   if (library.privateSession) document.querySelector('#video-status').textContent += ' · 시크릿 창의 재생 기록은 저장하지 않습니다.';
@@ -123,6 +217,12 @@ try {
     const link = document.createElement('button');
     const url = new URL(video.url);
     if (!['file:', 'content:'].includes(url.protocol)) continue;
+    const checkbox = document.createElement('input'); checkbox.type = 'checkbox';
+    checkbox.className = 'select-video'; checkbox.setAttribute('aria-label', `${video.title} 선택`);
+    checkbox.disabled = library.privateSession === true;
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selectedVideos.set(url.href, video); else selectedVideos.delete(url.href);
+    });
     link.className = 'play-video';
     link.dataset.videoUrl = url.href;
     link.textContent = video.title;
@@ -139,7 +239,7 @@ try {
     rename.textContent = '이름 변경';
     rename.disabled = library.privateSession === true;
     rename.addEventListener('click', async () => {
-      const title = prompt('영상 제목', link.textContent);
+      const title = await settingsDialog('영상 제목', link.textContent);
       if (title === null) return;
       rename.disabled = true;
       try {
@@ -151,7 +251,11 @@ try {
       } catch {document.querySelector('#video-status').textContent = '제목을 저장하지 못했습니다.';}
       finally {rename.disabled = false;}
     });
-    item.append(link, document.createTextNode(' '), rename);
+    const remove = document.createElement('button'); remove.className = 'secondary'; remove.textContent = '삭제';
+    remove.disabled = library.privateSession === true;
+    remove.addEventListener('click', () => deleteLibraryVideos([video], true));
+    const size = document.createElement('span'); size.className = 'muted'; size.textContent = videoSizeLabel(video);
+    item.append(checkbox, link, size, rename, remove);
     document.querySelector('#videos').append(item);
   }
 } catch {
@@ -173,13 +277,45 @@ function videoSizeLabel(item) {
   return `${item.sizeEstimated ? '약 ' : ''}${text} ${units[unit]}`;
 }
 const scanButton = document.querySelector('#scan-videos');
+const captureTab = document.querySelector('#capture-tab');
+const contextVideo = new URLSearchParams(location.search);
+let contextTabSelected = false;
+let scanGeneration = 0;
+async function refreshCaptureTabs() {
+  try {
+    const result = await sendWithPromise('internetBrowserCapture', 'tabs');
+    const previous = captureTab.value;
+    captureTab.replaceChildren();
+    for (const tab of result.tabs || []) {
+      const option = document.createElement('option'); option.value = tab.token;
+      option.textContent = `${tab.active ? '현재 탭 · ' : ''}${tab.title || '제목 없음'} · ${tab.url}`;
+      captureTab.append(option);
+    }
+    const rows = result.tabs || [];
+    const contextTab = !previous && contextVideo.has('source') ? rows.find(tab => tab.url === contextVideo.get('source')) : null;
+    captureTab.value = rows.some(tab => tab.token === previous) ? previous : (contextTab || rows.find(tab => tab.active) || rows[0])?.token || '';
+    if (contextTab) contextTabSelected = true;
+    if (!captureTab.value) captureStatus.textContent = '열린 웹 탭이 없습니다. 웹페이지에서 영상을 재생한 뒤 목록을 새로고침하세요.';
+  } catch { captureStatus.textContent = '열린 탭 목록을 불러오지 못했습니다.'; }
+}
+captureTab.addEventListener('change', () => {
+  ++scanGeneration;
+  document.querySelector('#capture-results').replaceChildren();
+  document.querySelector('#capture-reasons').replaceChildren();
+  captureStatus.textContent = '선택한 탭에서 영상 찾기를 누르세요.';
+});
+document.querySelector('#refresh-capture-tabs').addEventListener('click', refreshCaptureTabs);
+await refreshCaptureTabs();
 scanButton.addEventListener('click', async () => {
+  if (!captureTab.value) { captureStatus.textContent = '탭 목록에서 영상이 있는 페이지를 먼저 선택하세요.'; return; }
   scanButton.disabled = true;
+  const generation = ++scanGeneration;
   captureStatus.textContent = '열린 페이지에서 영상을 찾고 있습니다…';
   document.querySelector('#capture-results').replaceChildren();
   document.querySelector('#capture-reasons').replaceChildren();
   try {
-    const result = await sendWithPromise('internetBrowserCapture', 'scan');
+    const result = await sendWithPromise('internetBrowserCapture', 'scan', captureTab.value);
+    if (generation !== scanGeneration) return;
     if (result.error) throw new Error(result.error);
     const groups = new Map();
     for (const item of result.items || []) {
@@ -194,6 +330,8 @@ scanButton.addEventListener('click', async () => {
       document.querySelector('#capture-reasons').append(li);
     }
     for (const [page, items] of groups) {
+      const clicked = items.findIndex(item => item.url === contextVideo.get('media'));
+      if (clicked > 0) items.unshift(...items.splice(clicked, 1));
       const row = document.createElement('article');
       const description = document.createElement('div');
       const heading = document.createElement('h3'); heading.textContent = items[0].title || '영상';
@@ -251,6 +389,7 @@ scanButton.addEventListener('click', async () => {
   } catch (error) { captureStatus.textContent = error.message || '영상을 검사하지 못했습니다.'; }
   finally { scanButton.disabled = false; }
 });
+if (contextTabSelected) scanButton.click();
 const transferHistoryKey = 'video-transfer-dismissed-v1';
 function dismissedTransfers() {
   try {
@@ -347,7 +486,45 @@ const updateCheck = document.querySelector('#update-check');
 const updateDownload = document.querySelector('#update-download');
 const updateInstall = document.querySelector('#update-install');
 const updateSettings = document.querySelector('#update-settings');
+const updateSecurity = document.querySelector('#update-security');
+const updateLocation = document.querySelector('#update-location');
+const updateProgressArea = document.querySelector('#update-progress-area');
+const updateProgress = document.querySelector('#update-progress');
+const updateProgressLabel = document.querySelector('#update-progress-label');
+let updateDownloading = false;
+let returningFromSecurity = false;
 let updateCandidate;
+function displayUpdateCandidate(release) {
+  updateCandidate = release;
+  document.querySelector('#update-title').textContent = `Internet Browser ${release.version}`;
+  document.querySelector('#update-notes').textContent = release.description || '';
+  document.querySelector('#update-page').href = release.releasePage;
+  updateDownload.disabled = !release.canInstall;
+  updateSettings.hidden = !release.android; updateSecurity.hidden = !release.android;
+  updateRelease.hidden = false;
+}
+let recoveringUpdate = false;
+async function recoverUpdate() {
+  if (recoveringUpdate || updateDownloading) return;
+  recoveringUpdate = true;
+  try {
+    const state = await sendWithPromise('internetBrowserUpdate', 'progress');
+    if (!state.available || !['downloading', 'verifying', 'ready'].includes(state.phase)) return;
+    displayUpdateCandidate(state);
+    const active = state.phase !== 'ready';
+    updateCheck.disabled = active; updateDownload.disabled = true;
+    updateInstall.hidden = !state.verified; updateLocation.hidden = !state.verified;
+    updateProgressArea.hidden = false;
+    const total = Number(state.totalBytes) || 0, received = Number(state.receivedBytes) || 0;
+    const percent = state.verified ? 100 : total ? Math.min(100, received / total * 100) : 0;
+    updateProgress.value = percent;
+    updateProgressLabel.textContent = state.phase === 'verifying' ? '파일 검증 중…'
+      : state.verified ? '100% · 다운로드 및 파일 검증 완료'
+      : `${Math.floor(percent)}% · ${(received / 1048576).toFixed(1)} MB / ${(total / 1048576).toFixed(1)} MB`;
+    if (state.verified) document.querySelector('#update-return-help').hidden = !state.android;
+  } catch { /* Keep the user's current controls if a state refresh fails. */ }
+  finally { recoveringUpdate = false; }
+}
 updateAuto.checked = localStorage.getItem('update_auto_check') !== 'false';
 updateAuto.addEventListener('change', () => localStorage.setItem('update_auto_check', String(updateAuto.checked)));
 async function checkUpdate(automatic = false) {
@@ -355,6 +532,8 @@ async function checkUpdate(automatic = false) {
   updateStatus.textContent = automatic ? '' : '공식 릴리스를 확인하는 중…';
   updateRelease.hidden = true;
   updateInstall.hidden = true;
+  updateLocation.hidden = true;
+  updateProgressArea.hidden = true;
   updateDownload.disabled = true;
   try {
     const release = await sendWithPromise('internetBrowserUpdate', 'check');
@@ -362,13 +541,8 @@ async function checkUpdate(automatic = false) {
     localStorage.setItem('update_last_auto_check', String(Date.now()));
     if (!release.available) {updateStatus.textContent = automatic ? '' : '최신 버전을 사용 중입니다.'; return;}
     if (automatic && localStorage.getItem('update_snoozed_tag') === release.tag && Number(localStorage.getItem('update_snoozed_until')) > Date.now()) return;
-    updateCandidate = release;
-    document.querySelector('#update-title').textContent = `Internet Browser ${release.version}`;
-    document.querySelector('#update-notes').textContent = release.description || '';
-    document.querySelector('#update-page').href = release.releasePage;
-    updateDownload.disabled = !release.canInstall;
-    updateSettings.hidden = !release.android;
-    updateRelease.hidden = false;
+    displayUpdateCandidate(release);
+    await recoverUpdate();
     updateStatus.textContent = release.canInstall ? '새 버전이 있습니다. 다운로드한 파일은 설치 전에 검증합니다.' : '이 버전에는 앱에서 검증할 수 있는 설치 파일이 없습니다. 공식 릴리스를 확인해 주세요.';
   } catch (error) {
     updateStatus.textContent = automatic ? '' : error.message;
@@ -376,18 +550,66 @@ async function checkUpdate(automatic = false) {
 }
 updateCheck.addEventListener('click', () => checkUpdate());
 updateDownload.addEventListener('click', async () => {
+  if (updateDownloading) return;
+  updateDownloading = true;
   updateDownload.disabled = true; updateCheck.disabled = true;
-  updateStatus.textContent = '업데이트 다운로드 및 검증 중… 이 화면을 닫으면 취소됩니다.';
+  updateInstall.hidden = true; updateLocation.hidden = true;
+  updateProgressArea.hidden = false; updateProgress.value = 0;
+  updateProgressLabel.textContent = '다운로드 준비 중…';
+  updateStatus.textContent = '업데이트 다운로드 중…';
+  let polling = false;
+  const poll = setInterval(async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      const state = await sendWithPromise('internetBrowserUpdate', 'progress');
+      if (!updateDownloading) return;
+      const received = Math.max(0, Number(state.receivedBytes) || 0);
+      const total = Math.max(0, Number(state.totalBytes) || 0);
+      const percent = total ? Math.min(100, received / total * 100) : 0;
+      if (total) updateProgress.value = percent; else updateProgress.removeAttribute('value');
+      const mb = bytes => `${(bytes / 1048576).toLocaleString('ko-KR', {maximumFractionDigits: 1})} MB`;
+      updateProgressLabel.textContent = state.phase === 'verifying' ? '다운로드 완료 · 파일 검증 중…'
+        : `${total ? `${Math.floor(percent)}% · ` : ''}${mb(received)} / ${total ? mb(total) : '용량 확인 중'}`;
+    } catch { /* A failed status poll must not cancel the native download. */ }
+    finally { polling = false; }
+  }, 500);
   try {
     const result = await sendWithPromise('internetBrowserUpdate', 'download');
     if (result.error || !result.verified) throw new Error(result.error || '다운로드 파일을 검증하지 못했습니다.');
     updateInstall.hidden = false;
+    updateLocation.hidden = false; updateProgress.value = 100;
+    updateProgressLabel.textContent = '100% · 다운로드 및 파일 검증 완료';
     updateStatus.textContent = '파일 크기와 SHA-256 검증을 완료했습니다. 설치하려면 아래 버튼을 눌러 주세요.';
+    if (updateCandidate.android) {
+      document.querySelector('#update-return-help').hidden = false;
+      returningFromSecurity = true;
+      const settings = await sendWithPromise('internetBrowserUpdate', 'security');
+      if (!settings.opened) updateStatus.textContent = '파일 검증 완료. 보안 설정을 직접 확인한 뒤 설치 계속하기를 눌러 주세요.';
+    }
   } catch (error) {updateStatus.textContent = error.message; updateDownload.disabled = false;}
-  finally {updateCheck.disabled = false;}
+  finally {clearInterval(poll); updateDownloading = false; updateCheck.disabled = false;}
 });
+window.addEventListener('focus', () => {
+  if (returningFromSecurity && !updateInstall.hidden) {
+    returningFromSecurity = false;
+    updateStatus.textContent = '설정 확인을 마쳤다면 설치 계속하기를 누르세요. 설치가 차단돼도 같은 파일로 다시 시도할 수 있습니다.';
+  }
+});
+for (const [button, command] of [[updateSecurity, 'security'], [updateLocation, 'location']]) {
+  button.addEventListener('click', async () => {
+    try {
+      const result = await sendWithPromise('internetBrowserUpdate', command);
+      if (!result.opened) throw new Error();
+      if (command === 'security') returningFromSecurity = true;
+      else updateStatus.textContent = updateCandidate?.android
+        ? '다운로드 화면을 열었습니다. Download/Internet Browser 폴더에 APK 복사본이 있습니다.'
+        : '설치 파일이 있는 폴더를 열었습니다.';
+    } catch { updateStatus.textContent = command === 'security' ? '보안 설정을 열지 못했습니다. 기기 설정에서 보안 및 개인정보 보호를 열어 주세요.' : '저장 위치를 열지 못했습니다. 설치 계속하기로 다시 시도할 수 있습니다.'; }
+  });
+}
 updateInstall.addEventListener('click', async () => {
-  if (!confirm(`Internet Browser ${updateCandidate.version} 설치 프로그램을 여시겠습니까?`)) return;
+  if (!await settingsDialog(`Internet Browser ${updateCandidate.version} 설치 프로그램을 여시겠습니까?`)) return;
   updateInstall.disabled = true; updateCheck.disabled = true;
   try {
     const result = await sendWithPromise('internetBrowserUpdate', 'install');
@@ -409,4 +631,7 @@ document.querySelector('#update-snooze').addEventListener('click', () => {
   updateStatus.textContent = '7일 뒤 다시 알려드리겠습니다. 직접 업데이트 확인은 언제든 가능합니다.';
 });
 const lastCheck = Number(localStorage.getItem('update_last_auto_check') || 0);
-if (updateAuto.checked && (!Number.isFinite(lastCheck) || Date.now() - lastCheck >= 12 * 60 * 60 * 1000)) await checkUpdate(true);
+await recoverUpdate();
+if (!updateCandidate && updateAuto.checked && (!Number.isFinite(lastCheck) || Date.now() - lastCheck >= 12 * 60 * 60 * 1000)) await checkUpdate(true);
+window.addEventListener('focus', recoverUpdate);
+setInterval(() => { if (!document.hidden && !updateRelease.hidden) recoverUpdate(); }, 1500);
