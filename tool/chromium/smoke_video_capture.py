@@ -185,6 +185,8 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 eventually(lambda: cdp.evaluate(hub, '!!document.querySelector("#scan-videos")'))
                 def api(command, *args):
                     return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserCapture",'+','.join(json.dumps(x) for x in (command,*args))+');})()')
+                def library():
+                    return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserVideos");})()')
                 tab_rows = api('tabs')['tabs']
                 source_tab = next(row for row in tab_rows if row['url']==base+'/generic')
                 checks['tab_picker_excludes_other_profile'] = not any(row['url']==base+'/private' for row in tab_rows)
@@ -201,6 +203,12 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 cdp.evaluate(hub, '[...document.querySelectorAll("#capture-results article")].find(row=>row.querySelector("h3").textContent.includes("일반 영상")).querySelector("button").click()')
                 eventually(lambda: any(file.read_bytes()==webm for file in profile.glob('*/InternetBrowserVideos/*/video.webm')))
                 checks['native_capture_download_exact_bytes'] = True
+                direct_library = eventually(library, lambda value:any(row['url'].endswith('/video.webm') for row in value.get('videos',[])))
+                direct_webm = next(row for row in direct_library['videos'] if row['url'].endswith('/video.webm'))
+                cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserOpenVideo",'+json.dumps(direct_webm['url'])+');})()')
+                checks['direct_webm_saved_video_playable'] = eventually(lambda:cdp.evaluate(hub, '!!document.querySelector("#internet-browser-player")&&document.querySelector("video").readyState>=1'))
+                cdp.call('Page.navigate', {'url':'chrome://internet-browser/'}, session=hub)
+                eventually(lambda:cdp.evaluate(hub, '!!document.querySelector("#scan-videos")'))
                 _, bad_page = open_page(base+'/bad-video-page')
                 bad_tab = next(row for row in api('tabs')['tabs'] if row['url']==base+'/bad-video-page')
                 bad_candidates = api('scan', bad_tab['token'])['items']
@@ -263,8 +271,6 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 checks['hls_cancel'] = any(row['guid']==cancellation['guid'] and row['state']==2 for row in cancelled.get('items',[]))
                 eventually(lambda: not list(profile.glob('*/InternetBrowserVideos/*/video.part')))
                 checks['hls_cancel_not_in_library'] = not list(profile.glob('*/InternetBrowserVideos/stream-'+cancellation['guid'].split(':')[1]+'/complete.json'))
-                def library():
-                    return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserVideos");})()')
                 eventually(lambda: cdp.evaluate(hub, '!document.querySelector("#clear-video-transfers").disabled'))
                 cdp.evaluate(hub, 'document.querySelector("#clear-video-transfers").click()')
                 eventually(lambda: cdp.evaluate(hub, 'document.querySelectorAll("#video-transfers .video-transfer").length===0'))
@@ -352,6 +358,9 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 webm_row = next(row for row in library()['videos'] if row['url'] in owned_urls)
                 hidden = delete_video(webm_row['url'], False)
                 checks['record_only_delete_preserves_media_bytes'] = hidden.get('deleted') is True and all(path.read_bytes()==data for path,data in webm_files.items()) and not any(row['url']==webm_row['url'] for row in library()['videos'])
+                direct_path = next(profile.glob('*/InternetBrowserVideos/*/video.webm'))
+                direct_deleted = delete_video(direct_webm['url'], True)
+                checks['direct_webm_delete_removes_file_and_marker'] = direct_deleted.get('deleted') is True and not direct_path.exists() and not direct_path.with_name('complete.json').exists()
                 erased = delete_video(durable['url'], True)
                 checks['pair_delete_removes_video_audio_and_completion_marker'] = erased.get('deleted') is True and all(not pair_marker.with_name(name).exists() for name in ('video.mp4','audio.mp4','complete.json'))
                 checks['pair_delete_preserves_other_saved_video'] = yt_marker.with_name('video.mp4').read_bytes()==dash_video and yt_marker.with_name('audio.mp4').read_bytes()==dash_audio

@@ -53,6 +53,7 @@ VIDEO_CAPTURE_CHECKS = {'capture_screen_and_quality_options', 'native_capture_do
     'active_transmux_partial_cleanup'}
 VIDEO_CAPTURE_CHECKS |= {
     'html_response_rejected_bad-video.mp4', 'html_response_rejected_fake-video.mp4',
+    'direct_webm_saved_video_playable', 'direct_webm_delete_removes_file_and_marker',
     'tab_picker_excludes_other_profile', 'native_scan_only_selected_tab', 'forged_tab_token_rejected',
     'navigated_tab_token_rejected', 'saved_pair_reports_combined_size', 'non_library_file_delete_rejected',
     'record_only_delete_preserves_media_bytes', 'pair_delete_removes_video_audio_and_completion_marker',
