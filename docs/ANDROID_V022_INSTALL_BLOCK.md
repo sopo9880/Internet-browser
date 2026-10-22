@@ -7,6 +7,16 @@ The device dialog reads `악성 앱 설치 차단됨` and
 classification is not yet known. This is a failed
 device-installation observation, not successful Android acceptance.
 
+The user subsequently reported that uninstalling the previous app, downloading
+again and performing a fresh installation succeeded. Record this as human-reported
+fresh-installation acceptance on the same reported device; the device APK hash
+was not independently measured. The previous-app upgrade failure remains an
+unresolved observation. This sequence alone does not establish a signature
+conflict, scanner false positive or malware-safety verdict. Browsing, extensions,
+ByeDPI and migration acceptance are separate from installer success. Do not
+recommend uninstalling an existing app as an upgrade fix: its private data may be
+removed.
+
 The published APK remains unchanged:
 
 - Package: `io.github.sopo9880.internet_browser`
