@@ -2,6 +2,7 @@
   'use strict';
   const items = new Map();
   const reasons = new Set();
+  let youtubeVisitor = '';
   const title = (document.querySelector('meta[property="og:title"]')?.content || document.title || '영상').slice(0, 200);
   const protectedMedia = [...document.querySelectorAll('video')].some(v => v.mediaKeys);
   function remote(address) {
@@ -43,6 +44,8 @@
   // protected/signature-cipher stream. Walk bounded JSON for Instagram/JSON-LD.
   function walk(value, depth = 0, budget = {left: 8000}) {
     if (!value || typeof value !== 'object' || depth > 12 || --budget.left < 0) return;
+    if (typeof value.responseContext?.visitorData === 'string' && value.responseContext.visitorData.length <= 4096)
+      youtubeVisitor = value.responseContext.visitorData;
     if (value.streamingData) {
       const page = new URL(document.baseURI);
       const id = page.pathname === '/watch' ? page.searchParams.get('v') : /^\/(shorts|embed|live)\//.test(page.pathname) ? page.pathname.split('/')[2] : null;
@@ -91,8 +94,30 @@
   for (const script of document.scripts) {
     const text = script.textContent;
     if (text.length > 2 * 1024 * 1024 || (bytes += text.length) > 8 * 1024 * 1024) continue;
+    if (!youtubeVisitor) {
+      const visitor = /"VISITOR_DATA"\s*:\s*("(?:[^"\\]|\\.){1,8192}")/.exec(text);
+      if (visitor) try {
+        const value = JSON.parse(visitor[1]);
+        if (typeof value === 'string' && value.length <= 4096) youtubeVisitor = value;
+      } catch {}
+    }
     if (script.type === 'application/ld+json' || script.type === 'application/json') { try { walk(JSON.parse(text)); } catch {} }
     else if (text.includes('ytInitialPlayerResponse')) embeddedPlayer(text);
+  }
+  const page = new URL(document.URL);
+  const youtubeId = page.pathname === '/watch' ? page.searchParams.get('v')
+    : /^\/(shorts|embed|live)\//.test(page.pathname) ? page.pathname.split('/')[2] : '';
+  if (!protectedMedia && ['www.youtube.com', 'youtube.com', 'm.youtube.com'].includes(page.hostname) &&
+      page.protocol === 'https:' && /^[\w-]{11}$/.test(youtubeId || '') && youtubeVisitor) {
+    // Raw WEB format URLs can require unresolved n/PO-token processing and
+    // fail with 403 even for 360p. Let the native resolver obtain public HLS.
+    for (const [key, item] of items) {
+      const host = new URL(item.url).hostname;
+      if (item.source === 'youtube' || host === 'googlevideo.com' || host.endsWith('.googlevideo.com')) items.delete(key);
+    }
+    if (items.size >= 60) items.delete(items.keys().next().value);
+    items.set('youtube-native', {url: page.href, title, kind: 'youtube', mime: '',
+      quality: '제공 화질 확인', source: 'youtube', visitorData: youtubeVisitor});
   }
   return {documentUrl: document.URL, items: [...items.values()], reasons: [...reasons]};
 })()

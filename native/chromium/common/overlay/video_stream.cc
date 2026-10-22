@@ -317,11 +317,14 @@ void VideoStream::TransmuxInput(base::FilePath path, std::string encoded) {
     waiting_ = false; Fail("영상 변환 작업 공간을 준비하지 못했습니다."); return;
   }
   processor_isolated_ = true;
-  base::DictValue request; request.Set("id", id_); request.Set("data", std::move(encoded));
-  request.Set("first", completed_ == 0); request.Set("last", completed_ + 1 == parts_.size());
+  const bool audio = completed_ >= audio_start_;
+  const bool first = completed_ == 0 || completed_ == audio_start_;
+  base::DictValue request; request.Set("id", id_ + (audio ? "-audio" : "-video")); request.Set("data", std::move(encoded));
+  request.Set("audio", audio); request.Set("first", first);
+  request.Set("last", completed_ + 1 == audio_start_ || completed_ + 1 == parts_.size());
   std::string json; base::JSONWriter::Write(request, &json);
   const std::string script = "(() => {const request=" + json + "; const create=" +
-      (completed_ == 0 ? std::string(kTransmuxerFactoryJs) : "null") + ";\n" + kVideoTransmuxerJs + "\n})()";
+      (first ? std::string(kTransmuxerFactoryJs) : "null") + ";\n" + kVideoTransmuxerJs + "\n})()";
   frame->ExecuteJavaScriptInIsolatedWorld(base::UTF8ToUTF16(script),
       base::BindOnce(&VideoStream::Transmuxed, weak_factory_.GetWeakPtr(), path), ISOLATED_WORLD_ID_CHROME_INTERNAL);
 }
@@ -346,7 +349,8 @@ void VideoStream::Transmuxed(base::FilePath path, base::Value result) {
     waiting_ = false; Fail("이 MPEG-TS 구간의 코덱 또는 형식을 MP4로 변환할 수 없습니다."); return;
   }
   worker_->PostTaskAndReplyWithResult(FROM_HERE, base::BindOnce(&SaveTransmuxed, path,
-      directory_.AppendASCII("video.part"), completed_ == 0, *encoded),
+      directory_.AppendASCII(completed_ >= audio_start_ ? "audio.part" : "video.part"),
+      completed_ == 0 || completed_ == audio_start_, *encoded),
       base::BindOnce(&VideoStream::Appended, weak_factory_.GetWeakPtr()));
 }
 void VideoStream::Inspected(GURL final_url, std::string body) {

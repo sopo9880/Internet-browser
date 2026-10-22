@@ -82,3 +82,30 @@ test('unciphered YouTube adaptive MP4 formats retain the selected video and high
   assert.equal(result.items.length,1);assert.equal(result.items[0].kind,'pair');
   assert.equal(result.items[0].quality,'1080p');assert.equal(result.items[0].audioUrl,'https://cdn.test/a-high.m4a');
 });
+
+test('real YouTube pages use native public HLS discovery instead of unusable raw WEB URLs', () => {
+  const payload = {responseContext: {visitorData: 'anonymous-visitor'}, videoDetails:{videoId:'KMH4gUTuYJs'}, streamingData:{
+    formats:[{url:'https://rr1.googlevideo.com/videoplayback?n=unprocessed',mimeType:'video/mp4',qualityLabel:'360p'}],
+    adaptiveFormats:[{itag:299,mimeType:'video/mp4',qualityLabel:'1080p60'}],serverAbrStreamingUrl:'https://rr1.googlevideo.com/sabr'}};
+  const result = scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',
+    scripts:[{type:'',textContent:'var ytInitialPlayerResponse = '+JSON.stringify(payload)+';'}]});
+  assert.equal(result.items.length,1);assert.equal(result.items[0].kind,'youtube');
+  assert.equal(result.items[0].url,'https://www.youtube.com/watch?v=KMH4gUTuYJs');
+  assert.equal(result.items[0].visitorData,'anonymous-visitor');
+  assert.equal(result.items[0].quality,'제공 화질 확인');
+});
+
+test('visitor config is read as bounded JSON without executing script', () => {
+  const result=scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts:[{type:'',
+    textContent:'ytcfg.set({"VISITOR_DATA":"anonymous"}); throw new Error("never execute");'}]});
+  assert.equal(result.items[0].kind,'youtube');assert.equal(result.items[0].visitorData,'anonymous');
+  assert.equal(scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts:[{type:'',
+    textContent:JSON.stringify({VISITOR_DATA:'x'.repeat(4097)})}]}).items.length,0);
+});
+
+test('native YouTube discovery cannot be requested from lookalike hosts or DRM media', () => {
+  const scripts=[{type:'',textContent:'ytcfg.set({"VISITOR_DATA":"anonymous"});'}];
+  assert.equal(scan({baseURI:'https://www.youtube.com.attacker.test/watch?v=KMH4gUTuYJs',scripts}).items.length,0);
+  assert.equal(scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts,
+    videos:[video('blob:https://www.youtube.com/id',{mediaKeys:{}})]}).items.length,0);
+});

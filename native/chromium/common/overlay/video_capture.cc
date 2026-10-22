@@ -12,6 +12,7 @@
 #include "chrome/browser/internet_browser/video_file_types.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
 #include "chrome/browser/internet_browser/video_stream.h"
+#include "chrome/browser/internet_browser/video_youtube.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
@@ -40,6 +41,7 @@ void VideoCapture::OnProfileWillBeDestroyed(Profile*) {
   scan_reply_.Reset(); candidates_.clear();
   for (const auto& stream : streams_) stream->Shutdown();
   streams_.clear(); profile_observation_.Reset();
+  youtube_.clear();
 }
 VideoCapture* VideoCapture::Get(Profile* profile) {
   static constexpr char key[] = "internet-browser-video-capture";
@@ -93,7 +95,9 @@ void VideoCapture::Scanned(content::WeakDocumentPtr document, base::Value value)
         const auto* address = item->FindString("url");
         const auto* kind = item->FindString("kind");
         if (!address || address->size() > 16384 || !Remote(GURL(*address)) || !kind ||
-            (*kind != "file" && *kind != "hls" && *kind != "dash" && *kind != "pair")) continue;
+            (*kind != "file" && *kind != "hls" && *kind != "dash" && *kind != "pair" && *kind != "youtube")) continue;
+        if (*kind == "youtube" && (YoutubeVideo::VideoId(frame->GetLastCommittedURL()).empty() ||
+            GURL(*address).GetWithoutRef() != frame->GetLastCommittedURL().GetWithoutRef())) continue;
         auto row = item->Clone();
         std::vector<GURL> video_parts, audio_parts;
         const auto* mime = item->FindString("mime");
@@ -112,7 +116,7 @@ void VideoCapture::Scanned(content::WeakDocumentPtr document, base::Value value)
         const auto token = base::UnguessableToken::Create().ToString();
         row.Set("token", token);
         candidates_.emplace(token, Candidate{document, frame->GetLastCommittedURL().GetWithoutRef(), row.Clone(), std::move(video_parts), std::move(audio_parts), transport});
-        found_.Append(std::move(row));
+        row.Remove("visitorData"); found_.Append(std::move(row));
       }
     }
     if (const auto* reasons = data->FindList("reasons"))
@@ -207,6 +211,23 @@ void VideoCapture::Inspect(const std::string& token, Reply reply) {
   std::erase_if(streams_, [](const auto& job) { const auto status = job->Status(); return status.FindBool("inspection").value_or(false) && status.FindInt("state").value_or(0) != 0; });
   const auto active = std::count_if(streams_.begin(), streams_.end(), [](const auto& job) { return job->Status().FindInt("state").value_or(0) == 0; });
   const auto kind = *it->second.data.FindString("kind");
+  if (kind == "youtube" || kind == "youtube_hls") {
+    std::erase_if(youtube_, [](const auto& job) { return job->done(); });
+    if (youtube_.size() >= 4 || profile_->IsOffTheRecord()) {
+      std::move(reply).Run(Error("이 창에서 추가 YouTube 스트림을 확인할 수 없습니다.")); return;
+    }
+    auto job = std::make_unique<YoutubeVideo>(profile_, it->second.document, it->second.source_url);
+    auto* pointer = job.get(); youtube_.push_back(std::move(job));
+    auto callback = base::BindOnce(&VideoCapture::Inspected, weak_factory_.GetWeakPtr(), token, std::move(reply));
+    if (kind == "youtube") {
+      const auto* visitor = it->second.data.FindString("visitorData");
+      pointer->Discover(visitor ? *visitor : std::string(), std::move(callback));
+    } else {
+      const auto* audio = it->second.data.FindString("audioUrl");
+      pointer->Resolve(GURL(*it->second.data.FindString("url")), audio ? GURL(*audio) : GURL(), std::move(callback));
+    }
+    return;
+  }
   if ((kind != "hls" && kind != "dash") || active >= 4 || profile_->IsOffTheRecord()) {
     std::move(reply).Run(Error("이 창에서 스트림을 확인할 수 없습니다.")); return;
   }
@@ -246,7 +267,9 @@ void VideoCapture::Inspected(std::string token, Reply reply, base::DictValue res
       row.Set("token", id); row.Set("kind", "stream"); row.Set("paired", !audio.empty());
       if (const auto* quality = variant.FindString("quality")) row.Set("quality", *quality);
       if (const auto* language = variant.FindString("audioLanguage"); language && !language->empty()) row.Set("audioLanguage", *language);
-      candidates_.emplace(id, Candidate{document, source_url, row.Clone(), std::move(video), std::move(audio)});
+      const bool transport = variant.FindBool("transportStream").value_or(false);
+      row.Set("convertedFromTs", transport); row.Remove("visitorData");
+      candidates_.emplace(id, Candidate{document, source_url, row.Clone(), std::move(video), std::move(audio), transport});
       rows.Append(std::move(row));
     }
   }
@@ -256,6 +279,11 @@ void VideoCapture::Inspected(std::string token, Reply reply, base::DictValue res
       const auto* address = variant.FindString("url");
       if (!address || !Remote(GURL(*address)) || candidates_.size() >= 300) continue;
       auto row = original.Clone(); row.Set("url", *address); row.Set("quality", *variant.FindString("quality"));
+      if (const auto* kind = variant.FindString("kind"); kind && *kind == "youtube_hls") {
+        row.Set("kind", *kind); row.Remove("visitorData");
+        if (const auto* audio = variant.FindString("audioUrl")) row.Set("audioUrl", *audio);
+        if (const auto* language = variant.FindString("audioLanguage")) row.Set("audioLanguage", *language);
+      }
       const auto id = base::UnguessableToken::Create().ToString(); row.Set("token", id);
       candidates_.emplace(id, Candidate{document, source_url, row.Clone(), {}}); rows.Append(std::move(row));
     }

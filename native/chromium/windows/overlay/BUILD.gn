@@ -55,7 +55,7 @@ source_set("updater") {
 }
 
 source_set("video_library") {
-  sources = [ "video_capture.cc", "video_capture.h", "video_dash.cc", "video_dash.h", "video_stream.cc", "video_stream.h", "video_playlist.h", "resources.h", "video_downloads.cc", "video_downloads.h", "video_file_types.h", "video_metadata.h" ]
+  sources = [ "video_capture.cc", "video_capture.h", "video_youtube.cc", "video_youtube.h", "video_dash.cc", "video_dash.h", "video_stream.cc", "video_stream.h", "video_playlist.h", "resources.h", "video_downloads.cc", "video_downloads.h", "video_file_types.h", "video_metadata.h" ]
   public_deps = [ "//base" ]
-  deps = [ "//ui/base:types", "//content/public/common", "//services/data_decoder/public/cpp", "//chrome/browser/profiles:profile", "//chrome/browser/ui/tab_contents", "//components/tabs:public", "//chrome/common", ":legacy_data", "//components/download/public/common:public", "//content/public/browser", "//net", "//url" ]
+  deps = [ "//services/network/public/cpp", "//services/network/public/mojom", "//ui/base:types", "//content/public/common", "//services/data_decoder/public/cpp", "//chrome/browser/profiles:profile", "//chrome/browser/ui/tab_contents", "//components/tabs:public", "//chrome/common", ":legacy_data", "//components/download/public/common:public", "//content/public/browser", "//net", "//url" ]
 }

@@ -3,12 +3,20 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace internet_browser {
 struct VideoPlaylistPart {
+  VideoPlaylistPart(std::string location = {}, std::string label = {})
+      : address(std::move(location)), quality(std::move(label)) {}
   std::string address;
   std::string quality;
+  std::string audio_group;
+  std::string audio_address;
+  std::string audio_language;
+  std::string codecs;
+  std::string frame_rate;
 };
 struct VideoPlaylist {
   std::vector<VideoPlaylistPart> variants;
@@ -47,13 +55,15 @@ inline std::map<std::string, std::string> PlaylistAttributes(const std::string& 
 }
 // Deliberately bounded VOD support. Never save encrypted/live/multi-track
 // playlists as if they were complete playable files.
-inline VideoPlaylist ParseVideoPlaylist(const std::string& text) {
+inline VideoPlaylist ParseVideoPlaylist(const std::string& text, bool separate_audio = false) {
   VideoPlaylist result;
   if (text.size() > 2 * 1024 * 1024 || !text.starts_with("#EXTM3U")) {
     result.error = "올바른 HLS 재생 목록이 아닙니다."; return result;
   }
   bool ended = false, expect_variant = false;
-  std::string quality;
+  VideoPlaylistPart variant;
+  struct Audio { std::string address, language; bool preferred = false; };
+  std::map<std::string, Audio> audio_groups;
   for (size_t start = 0; start < text.size();) {
     const auto end = text.find('\n', start);
     const auto line = PlaylistTrim(text.substr(start, end - start));
@@ -69,12 +79,29 @@ inline VideoPlaylist ParseVideoPlaylist(const std::string& text) {
       const auto attrs = PlaylistAttributes(line.substr(13));
       const auto type = attrs.find("TYPE");
       if (type != attrs.end() && type->second == "AUDIO" && attrs.contains("URI")) {
-        result.error = "별도의 음성 트랙이 있는 HLS 영상은 합치기 지원이 필요합니다."; return result;
+        if (!separate_audio) {
+          result.error = "별도의 음성 트랙이 있는 HLS 영상은 합치기 지원이 필요합니다."; return result;
+        }
+        if (!attrs.contains("GROUP-ID") || attrs.at("GROUP-ID").empty() ||
+            attrs.at("GROUP-ID").size() > 256 || attrs.at("URI").empty() ||
+            attrs.at("URI").size() > 16384 || audio_groups.size() >= 60) {
+          result.error = "음성 트랙 정보가 올바르지 않거나 지원 범위를 초과합니다."; return result;
+        }
+        const bool preferred = attrs.contains("DEFAULT") && attrs.at("DEFAULT") == "YES";
+        const auto found = audio_groups.find(attrs.at("GROUP-ID"));
+        if (found == audio_groups.end() || (!found->second.preferred && preferred)) {
+          const auto language = attrs.contains("LANGUAGE") ? attrs.at("LANGUAGE").substr(0, 80) : std::string();
+          audio_groups[attrs.at("GROUP-ID")] = {attrs.at("URI"), language, preferred};
+        }
       }
     } else if (line.starts_with("#EXT-X-STREAM-INF:")) {
       auto attrs = PlaylistAttributes(line.substr(18));
-      quality = attrs["RESOLUTION"];
-      if (quality.empty()) quality = attrs["BANDWIDTH"].empty() ? "원본" : attrs["BANDWIDTH"] + " bps";
+      variant = {};
+      variant.quality = attrs["RESOLUTION"];
+      if (variant.quality.empty()) variant.quality = attrs["BANDWIDTH"].empty() ? "원본" : attrs["BANDWIDTH"] + " bps";
+      variant.audio_group = attrs["AUDIO"];
+      variant.codecs = attrs["CODECS"];
+      variant.frame_rate = attrs["FRAME-RATE"];
       expect_variant = true;
     } else if (line.starts_with("#EXT-X-MAP:")) {
       const auto attrs = PlaylistAttributes(line.substr(11));
@@ -88,12 +115,21 @@ inline VideoPlaylist ParseVideoPlaylist(const std::string& text) {
     } else if (line == "#EXT-X-ENDLIST") ended = true;
     else if (line.front() != '#') {
       if (line.size() > 16384) { result.error = "영상 구간 주소가 너무 깁니다."; return result; }
-      if (expect_variant) { result.variants.push_back({line, quality}); expect_variant = false; }
+      if (expect_variant) { variant.address = line; result.variants.push_back(variant); expect_variant = false; }
       else result.parts.push_back({line, {}});
     }
     if (result.parts.size() > 20000 || result.variants.size() > 60) {
       result.error = "영상의 구간 수가 지원 범위를 초과합니다."; return result;
     }
+  }
+  if (separate_audio) for (auto& item : result.variants) {
+    if (item.audio_group.empty()) continue;
+    const auto audio = audio_groups.find(item.audio_group);
+    if (audio == audio_groups.end()) {
+      result.error = "선언된 음성 트랙을 찾을 수 없습니다."; return result;
+    }
+    item.audio_address = audio->second.address;
+    item.audio_language = audio->second.language;
   }
   if (expect_variant || (!result.variants.empty() && !result.parts.empty()) ||
       (result.variants.empty() && (result.parts.empty() || !ended)))
