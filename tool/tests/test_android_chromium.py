@@ -3,7 +3,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tool.chromium.prepare_android_product import brand, product_path
+from tool.chromium.prepare_android_product import (brand, brand_launcher_names, product_path,
+                                                   private_media_network_source, external_navigation_source)
 from tool.chromium.titanium_product import prepare_source, PRODUCT_PACKAGE, RESEARCH_PACKAGE
 from tool.tests.test_titanium_product import ARGS, BUILD, METADATA
 from tool.chromium.prepare_android_hooks import configuration, HOOK_ACTION
@@ -50,6 +51,46 @@ class AndroidProductOverlayTests(unittest.TestCase):
         self.assertIn('Copyright The Chromium Authors', result)
         self.assertIn('Internet Browser에서는', brand(
             '<translationbundle><translation id="1">Titanium에서는</translation></translationbundle>', xtb=True))
+
+    def test_launcher_strings_preserve_notices_and_reject_upstream_drift(self):
+        original = ('<resources><!-- Copyright The Titanium Authors -->'
+                    '<string name="app_name" translatable="false">Titanium</string>'
+                    '<string name="bookmark_widget_title">Titanium bookmarks</string>'
+                    '<string name="search_widget_title">Titanium search</string>'
+                    '<string name="quick_action_search_widget_title">Titanium quick action search</string>'
+                    '</resources>')
+        result = brand_launcher_names(original)
+        self.assertIn('Copyright The Titanium Authors', result)
+        self.assertIn('translatable="false">Internet Browser</string>', result)
+        self.assertIn('Internet Browser quick action search</string>', result)
+        for changed in (original.replace('>Titanium</string>', '>Changed</string>'),
+                        original.replace('name="app_name"', 'name="other"')):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                brand_launcher_names(changed)
+
+    def test_private_media_policy_retains_upstream_android_restrictions(self):
+        source = ('#include "base/android/path_utils.h"\n'
+                  'bool IsAccessAllowedAndroid(const base::FilePath& path) {\n'
+                  '  // Existing storage allowlist remains here.\n}\n'
+                  'return IsAccessAllowedAndroid(path);\n'
+                  '  return IsAccessAllowedInternal(path, profile_path);\n#else\n')
+        result = private_media_network_source(source)
+        self.assertIn('path.ReferencesParent()', result)
+        self.assertIn('canonical_profile', result)
+        self.assertIn('IsInternetBrowserMediaPath(absolute_path, canonical_profile)', result)
+        self.assertIn('Existing storage allowlist remains here.', result)
+        self.assertNotIn('EnableAccessToAllFilesForTesting', result)
+        with self.assertRaises(ValueError):
+            private_media_network_source(source.replace('return IsAccessAllowedAndroid(path);', 'changed();'))
+
+    def test_external_app_setting_is_applied_at_the_navigation_delegate(self):
+        original = ('    public boolean shouldDisableExternalIntentRequestsForUrl(\n'
+                    '            ExternalNavigationParams params, Intent intent) {\n'
+                    '        return false;\n    }')
+        result = external_navigation_source(original)
+        self.assertIn('shouldBlockInternetBrowserExternalApp(params.getUrl().getScheme())', result)
+        with self.assertRaises(ValueError):
+            external_navigation_source(original.replace('return false;', 'return true;'))
 
     def test_overlay_is_fatal_and_runs_after_upstream_patches_before_gn(self):
         before = (BUILD + '# https://grapheneos.org/build#browser-and-webview\n'

@@ -31,7 +31,12 @@ source_set("ui") {
     "//components/bookmarks/browser",
     "//content/public/common",
     "//ui/base:types",
+    "//chrome/browser/util:jni_headers",
   ]
+}
+
+source_set("media_access_policy") {
+  sources = [ "private_video_access.h", "video_file_types.h" ]
 }
 
 source_set("legacy_data") {

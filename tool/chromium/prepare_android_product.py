@@ -34,6 +34,28 @@ def brand(text: str, *, xtb: bool = False) -> str:
     return result
 
 
+def brand_launcher_names(text: str) -> str:
+    """Brand Android's compiled launcher/widget strings, preserving XML notices."""
+    names = {
+        'app_name': 'Titanium',
+        'bookmark_widget_title': 'Titanium bookmarks',
+        'search_widget_title': 'Titanium search',
+        'quick_action_search_widget_title': 'Titanium quick action search',
+    }
+    resource = ET.fromstring(text)
+    for name, original in names.items():
+        nodes = [node for node in resource.findall('string') if node.get('name') == name]
+        if len(nodes) != 1 or nodes[0].text != original:
+            raise ValueError('Pinned Titanium launcher string changed: ' + name)
+        pattern = rf'(<string\b[^>]*\bname="{name}"[^>]*>){re.escape(original)}(</string>)'
+        text, count = re.subn(pattern, lambda match: match[1] + original.replace(
+            'Titanium', PRODUCT['product_name'], 1) + match[2], text)
+        if count != 1:
+            raise ValueError('Pinned Titanium launcher string syntax changed: ' + name)
+    ET.fromstring(text)
+    return text
+
+
 def fingerprints(checkout: Path, before: str, after: str) -> dict[str, str]:
     # A clique fingerprint depends on the message and its meaning, not its
     # enclosing resource file. Wrap just the local message nodes so included
@@ -52,6 +74,8 @@ def product_path(checkout: Path, relative: str) -> Path:
         'chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java',
         'chrome/browser/extensions/extension_safety_check_utils.cc',
         'chrome/browser/chrome_browser_main_android.cc', 'chrome/browser/BUILD.gn',
+        'chrome/browser/net/chrome_network_delegate.cc', 'chrome/browser/net/BUILD.gn',
+        'chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java',
         'chrome/browser/ui/webui/chrome_web_ui_configs.cc', 'chrome/browser/ui/webui/BUILD.gn',
         'chrome/android/BUILD.gn', 'chrome/android/chrome_java_sources.gni',
         'chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java',
@@ -113,6 +137,54 @@ def native_changes(checkout: Path, transport: Path) -> dict[Path, bytes]:
     return changes
 
 
+def external_navigation_source(text: str) -> str:
+    anchor = ('    public boolean shouldDisableExternalIntentRequestsForUrl(\n'
+              '            ExternalNavigationParams params, Intent intent) {\n'
+              '        return false;\n    }')
+    return replace_once(text, anchor, anchor.replace('return false;',
+        'return org.chromium.chrome.browser.util.PlatformUtil\n'
+        '                .shouldBlockInternetBrowserExternalApp(params.getUrl().getScheme());'))
+
+
+def private_media_network_source(text: str) -> str:
+    text = replace_once(text, '#include "base/android/path_utils.h"\n',
+        '#include "base/android/path_utils.h"\n'
+        '#include "base/files/file_util.h"\n'
+        '#include "chrome/browser/internet_browser/private_video_access.h"\n')
+    helper = '''// Only saved media, never the entire app/profile directory.
+bool IsInternetBrowserMediaPath(const base::FilePath& path,
+                               const base::FilePath& profile_path) {
+  if (path.ReferencesParent()) return false;
+  base::FilePath relative;
+  if (!profile_path.empty() && profile_path.AppendRelativePath(path, &relative) &&
+      internet_browser::IsPrivateStreamVideoRelativePath(relative.AsUTF8Unsafe()))
+    return true;
+  base::FilePath data;
+  if (!base::android::GetDataDirectory(&data)) return false;
+  const auto legacy = data.DirName().AppendASCII("app_flutter").AppendASCII("Videos");
+  relative = base::FilePath();
+  if (legacy.AppendRelativePath(path, &relative) &&
+      internet_browser::IsLegacyVideoRelativePath(relative.AsUTF8Unsafe())) return true;
+  const auto canonical_legacy = base::MakeAbsoluteFilePath(legacy);
+  relative = base::FilePath();
+  return !canonical_legacy.empty() && canonical_legacy.AppendRelativePath(path, &relative) &&
+      internet_browser::IsLegacyVideoRelativePath(relative.AsUTF8Unsafe());
+}
+
+'''
+    text = replace_once(text, 'bool IsAccessAllowedAndroid(const base::FilePath& path) {',
+        helper + 'bool IsAccessAllowedAndroid(const base::FilePath& path,\n'
+        '                            const base::FilePath& profile_path) {\n'
+        '  if (IsInternetBrowserMediaPath(path, profile_path)) return true;')
+    text = replace_once(text, 'return IsAccessAllowedAndroid(path);',
+                        'return IsAccessAllowedAndroid(path, profile_path);')
+    return replace_once(text, '  return IsAccessAllowedInternal(path, profile_path);\n#else\n',
+        '  if (IsInternetBrowserMediaPath(path, profile_path)) {\n'
+        '    const auto canonical_profile = base::MakeAbsoluteFilePath(profile_path);\n'
+        '    return IsInternetBrowserMediaPath(absolute_path, canonical_profile);\n'
+        '  }\n  return IsAccessAllowedInternal(path, profile_path);\n#else\n')
+
+
 def native_source_changes(checkout: Path) -> dict[Path, bytes]:
     """Validate source anchors without applying or claiming compilation."""
     directory = checkout / 'chrome/browser/internet_browser'
@@ -142,9 +214,17 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
     def updater_java(text):
         if not text.rstrip().endswith('}'):
             raise ValueError('Pinned PlatformUtil class boundary changed')
-        methods = (ROOT / 'native/chromium/android/java/updater_methods.java.inc').read_text(encoding='utf-8')
+        methods = '\n'.join((ROOT / 'native/chromium/android/java' / name).read_text(encoding='utf-8')
+                            for name in ('updater_methods.java.inc', 'navigation_methods.java.inc'))
         return text.rstrip()[:-1] + '\n' + methods + '\n}\n'
     update('chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java', updater_java)
+    update('chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java',
+           external_navigation_source)
+    update('chrome/browser/net/chrome_network_delegate.cc', private_media_network_source)
+    update('chrome/browser/net/BUILD.gn', lambda text: replace_once(text,
+        '    ":key_pinning_proto",\n',
+        '    ":key_pinning_proto",\n'
+        '    "//chrome/browser/internet_browser:media_access_policy",\n'))
     update('chrome/android/java/res_template/xml/file_paths.xml', lambda text: replace_once(text,
         '</paths>', '    <cache-path name="internet_browser_updates" path="internet-browser-updates/" />\n</paths>'))
     update('chrome/browser/chrome_browser_main_android.cc', main)
@@ -263,6 +343,9 @@ def prepare(checkout: Path, transport: Path) -> dict:
     resource_root = checkout / 'chrome/android/java/res_titanium_base'
     if not resource_root.is_dir():
         raise ValueError('Pinned Titanium launcher resource directory missing')
+    launcher_names = resource_root / 'values/channel_constants.xml'
+    changes[launcher_names] = brand_launcher_names(
+        launcher_names.read_text(encoding='utf-8')).encode('utf-8')
     for path in resource_root.rglob('*.png'):
         with Image.open(path) as old:
             size = old.size

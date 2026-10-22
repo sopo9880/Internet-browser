@@ -69,6 +69,8 @@ jobs:
         run: |
           c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/video_file_types_check.cc -o "$RUNNER_TEMP/video-file-types-check"
           "$RUNNER_TEMP/video-file-types-check"
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. -Inative/chromium/common/overlay tool/tests/private_video_access_check.cc -o "$RUNNER_TEMP/private-video-access-check"
+          "$RUNNER_TEMP/private-video-access-check"
       - name: Verify native video discovery with controlled page data
         run: node --test tool/tests/video_discovery_test.cjs tool/tests/video_transmuxer_tracks_test.cjs tool/tests/video_transfer_history_test.cjs
       - name: Verify HLS playlist handling and unsupported stream reasons

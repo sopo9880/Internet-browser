@@ -32,12 +32,19 @@
 #include "content/public/common/referrer.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
+#include "build/build_config.h"
+#if BUILDFLAG(IS_ANDROID)
+#include "base/android/jni_android.h"
+#include "chrome/browser/util/jni_headers/PlatformUtil_jni.h"
+#endif
 
 namespace {
 class InternetBrowserHandler : public content::WebUIMessageHandler,
                                public content::DownloadManager::Observer {
  public:
   void RegisterMessages() override {
+    web_ui()->RegisterMessageCallback("internetBrowserNavigation",
+        base::BindRepeating(&InternetBrowserHandler::Navigation, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserCapture",
         base::BindRepeating(&InternetBrowserHandler::Capture, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserUpdate",
@@ -118,6 +125,22 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
     } else {
       base::DictValue result;result.Set("error", "알 수 없는 업데이트 요청입니다.");std::move(reply).Run(std::move(result));
     }
+  }
+  void Navigation(const base::ListValue& args) {
+    if ((args.size() != 1 && args.size() != 2) || !args[0].is_string() ||
+        (args.size() == 2 && !args[1].is_bool())) return;
+    AllowJavascript();
+    base::DictValue result;
+#if BUILDFLAG(IS_ANDROID)
+    auto* env = base::android::AttachCurrentThread();
+    if (args.size() == 2)
+      Java_PlatformUtil_setInternetBrowserBlockExternalApps(env, args[1].GetBool());
+    result.Set("supported", true);
+    result.Set("blockExternalApps", static_cast<bool>(Java_PlatformUtil_getInternetBrowserBlockExternalApps(env)));
+#else
+    result.Set("supported", false);
+#endif
+    Reply(args[0].GetString(), std::move(result));
   }
   void Status(const base::ListValue& args) {
     if (args.size() != 1 || !args[0].is_string())

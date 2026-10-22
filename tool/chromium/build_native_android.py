@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import struct
 import subprocess
@@ -36,7 +37,8 @@ PRODUCT_OBJECTS = tuple('obj/chrome/browser/internet_browser/' + target + '/' + 
     for target, source in (('transport', 'transport'), ('legacy_data', 'legacy_data'),
                           ('ui', 'internet_browser_ui'), ('video_player', 'video_player'),
                           ('video_player', 'video_subtitles'),
-                          ('updater', 'updater'), ('video_library', 'video_capture'), ('video_library', 'video_stream'), ('video_library', 'video_dash'), ('video_library', 'video_youtube'), ('video_library', 'video_playlist'), ('video_library', 'video_downloads')))
+                          ('updater', 'updater'), ('video_library', 'video_capture'), ('video_library', 'video_stream'), ('video_library', 'video_dash'), ('video_library', 'video_youtube'), ('video_library', 'video_playlist'), ('video_library', 'video_downloads'))) + (
+    'obj/chrome/browser/net/impl/chrome_network_delegate.o',)
 
 
 def sha256(path: Path) -> str:
@@ -53,6 +55,18 @@ def git(path: Path, *arguments: str) -> bytes:
 
 def head(path: Path) -> str:
     return git(path, 'rev-parse', 'HEAD').decode().strip()
+
+
+def cached_product_matches(product: dict, *, allow_previous_version: bool = False) -> bool:
+    if product == PRODUCT:
+        return True
+    if not allow_previous_version or not isinstance(product, dict):
+        return False
+    previous, current = product.get('app_version', ''), PRODUCT['app_version']
+    if not re.fullmatch(r'0\.[0-9]+\.[0-9]+', previous):
+        return False
+    return ({**product, 'app_version': current} == PRODUCT and
+            tuple(map(int, previous.split('.'))) <= tuple(map(int, current.split('.'))))
 
 
 def validate_source(workspace: Path, *, require_overlay: bool = True) -> dict:
@@ -90,7 +104,8 @@ def validate_source(workspace: Path, *, require_overlay: bool = True) -> dict:
         raise ValueError('Android product overlay has not been prepared')
     owned = set()
     if overlay:
-        if overlay['source_revision'] != head(source) or overlay['product'] != PRODUCT:
+        if (overlay['source_revision'] != head(source) or
+            not cached_product_matches(overlay['product'], allow_previous_version=not require_overlay)):
             raise ValueError('Android overlay revision/product differs')
         for relative, digest in overlay['files'].items():
             if sha256(product_path(source, relative)) != digest:

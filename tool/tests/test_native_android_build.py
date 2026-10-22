@@ -6,9 +6,20 @@ import sys
 from tempfile import TemporaryDirectory
 import unittest
 import zipfile
-from tool.chromium.build_native_android import verify_payload
+from tool.chromium.build_native_android import verify_payload, cached_product_matches, PRODUCT
 
 class NativeAndroidPayloadTests(unittest.TestCase):
+    def test_only_verified_previous_product_version_can_be_replaced_before_preparation(self):
+        previous = {**PRODUCT, 'app_version': '0.2.2'}
+        self.assertTrue(cached_product_matches(previous, allow_previous_version=True))
+        self.assertFalse(cached_product_matches(previous))
+        for changed in ({**previous, 'chromium_revision': '0' * 40},
+                        {**previous, 'product_name': 'Different'},
+                        {**previous, 'app_version': '0.999.0'},
+                        {**previous, 'app_version': 'invalid'}):
+            with self.subTest(changed=changed):
+                self.assertFalse(cached_product_matches(changed, allow_previous_version=True))
+
     def test_cli_imports_from_outside_repository(self):
         script=Path(__file__).resolve().parents[1]/'chromium/build_native_android.py'
         with TemporaryDirectory() as tmp:

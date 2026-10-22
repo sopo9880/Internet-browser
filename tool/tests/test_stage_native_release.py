@@ -13,7 +13,7 @@ from tool.chromium import stage_native_release as staging
 COMMIT = 'c' * 40
 TREE = 'b' * 40
 RUN_ID = 44
-METADATA = parse_pubspec('version: 0.2.2+1\n')
+METADATA = parse_pubspec('version: 0.2.3+1\n')
 
 
 class NativeReleaseStageTests(unittest.TestCase):
@@ -185,7 +185,7 @@ class NativeReleaseStageTests(unittest.TestCase):
             self.assertFalse(source_inputs['complete_corresponding_source_included'])
             for notice in source_inputs['upstream_notices']:
                 self.assertEqual(staging.sha256(output / ('upstream-' + notice['file'])), notice['sha256'])
-            self.assertEqual((windows / 'mini_installer.exe').read_bytes(), (output / 'Internet-browser-Windows-Setup-v0.2.2.exe').read_bytes())
+            self.assertEqual((windows / 'mini_installer.exe').read_bytes(), (output / 'Internet-browser-Windows-Setup-v0.2.3.exe').read_bytes())
             for line in (output / 'SHA256SUMS.txt').read_text().splitlines():
                 digest, name = line.split('  ', 1)
                 self.assertEqual(digest, staging.sha256(output / name))

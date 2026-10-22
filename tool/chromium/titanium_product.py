@@ -173,13 +173,21 @@ def verify_native_apk(
     actual = read_native_package(apk, aapt2)
     if actual != package:
         raise ValueError(f"Chromium APK package mismatch: {actual} != {package}")
-    if version_code is not None or version_name is not None:
+    check_version = version_code is not None or version_name is not None
+    if check_version:
         if version_code is None or not version_name:
             raise ValueError("Version code and name must be supplied together")
+    if check_version or package == PRODUCT_PACKAGE:
         output = subprocess.run(
             [str(aapt2), "dump", "badging", str(apk)],
             capture_output=True, text=True, check=True,
         ).stdout
+        if package == PRODUCT_PACKAGE:
+            application = next((line for line in output.splitlines()
+                                if line.startswith('application:')), '')
+            if not re.match(r"application: label='Internet Browser'(?:\s|$)", application):
+                raise ValueError('Compiled Android application label must be Internet Browser')
+    if check_version:
         manifest = next((line for line in output.splitlines()
                          if line.startswith("package:")), "")
         if (f"versionCode='{version_code}'" not in manifest or

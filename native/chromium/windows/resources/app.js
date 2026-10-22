@@ -52,6 +52,26 @@ document.querySelector('#dpi-form').addEventListener('submit', async event => {
   }
 });
 
+const blockExternalApps = document.querySelector('#block-external-apps');
+try {
+  const navigation = await sendWithPromise('internetBrowserNavigation');
+  document.querySelector('#navigation-section').hidden = !navigation.supported;
+  blockExternalApps.checked = navigation.blockExternalApps === true;
+} catch { /* Desktop and unavailable mobile preferences keep the section hidden. */ }
+blockExternalApps.addEventListener('change', async () => {
+  blockExternalApps.disabled = true;
+  const status = document.querySelector('#navigation-status');
+  try {
+    const result = await sendWithPromise('internetBrowserNavigation', blockExternalApps.checked);
+    if (!result.supported) throw new Error('Unsupported navigation setting');
+    blockExternalApps.checked = result.blockExternalApps === true;
+    status.textContent = '저장했습니다. 다음 링크부터 적용됩니다.';
+  } catch {
+    blockExternalApps.checked = !blockExternalApps.checked;
+    status.textContent = '설정을 저장하지 못했습니다.';
+  } finally { blockExternalApps.disabled = false; }
+});
+
 try {
   const legacy = await sendWithPromise('internetBrowserLegacy');
   document.querySelector('#legacy-section').hidden = !legacy.found;

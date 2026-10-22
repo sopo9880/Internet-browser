@@ -19,7 +19,7 @@ ARGS = (
 BUILD = "#!/bin/bash\nsource common.sh\n" + ARM32_TARGET + (
     "autoninja -C out/Default chrome_public_apk chrome_public_bundle\n"
 ) + ARM32_SIGN + "sign_apk out/tmp/$VERSION-arm64-v8a.apk out/release/$VERSION-arm64-v8a.apk\n"
-METADATA = {'version_code': 2_002_001, 'version_name': '0.2.2'}
+METADATA = {'version_code': 2_003_001, 'version_name': '0.2.3'}
 
 
 class TitaniumNativeProductTests(unittest.TestCase):
@@ -72,8 +72,8 @@ class TitaniumNativeProductTests(unittest.TestCase):
             ARGS, BUILD, PRODUCT_PACKAGE,
             **METADATA,
         )
-        self.assertIn('android_override_version_code = "2002001"', gn)
-        self.assertIn('android_override_version_name = "0.2.2"', gn)
+        self.assertIn('android_override_version_code = "2003001"', gn)
+        self.assertIn('android_override_version_name = "0.2.3"', gn)
 
     def test_wrong_product_versions_fail_closed(self):
         for code, name in [(2_000_001, "0.2.1"), (2_001_001, "1.0.0"),
@@ -164,6 +164,7 @@ class TitaniumNativeProductTests(unittest.TestCase):
                     CompletedProcess([], 0, stdout=(
                         "package: name='io.github.sopo9880.internet_browser' "
                         "versionCode='2001001' versionName='0.2.1'\n"
+                        "application: label='Internet Browser' icon='res/icon.xml'\n"
                     )),
                 ],
             ):
@@ -171,6 +172,20 @@ class TitaniumNativeProductTests(unittest.TestCase):
                     apk, aapt, PRODUCT_PACKAGE,
                     version_code=2001001, version_name="0.2.1",
                 )
+
+    def test_product_apk_rejects_unbranded_or_missing_compiled_application_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            apk = Path(tmp) / 'native.apk'
+            apk.write_bytes(b'mocked compiled APK')
+            aapt = Path(tmp) / 'aapt2'
+            aapt.touch()
+            for label in ('Titanium', 'Chromium', '', 'Internet Browser Other'):
+                with self.subTest(label=label), patch(
+                    'tool.chromium.titanium_product.subprocess.run',
+                    side_effect=[CompletedProcess([], 0, stdout=PRODUCT_PACKAGE + '\n'),
+                                 CompletedProcess([], 0, stdout=f"application: label='{label}' icon='res/icon.xml'\n")],
+                ), self.assertRaisesRegex(ValueError, 'application label'):
+                    verify_native_apk(apk, aapt, PRODUCT_PACKAGE)
 
 
 if __name__ == "__main__":
