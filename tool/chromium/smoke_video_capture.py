@@ -68,6 +68,9 @@ def server(media: Path):
             mime = 'text/html; charset=utf-8'
             body = b''
             if route in chunks: body, mime = chunks[route], 'video/mp4'
+            elif route in ('/bad-video.mp4', '/fake-video.mp4'):
+                body = b'<!doctype html><html>Sign in to continue</html>'
+                mime = 'text/html' if route == '/bad-video.mp4' else 'video/mp4'
             elif route in ['/clip.ts','/slow-second.ts']: body, mime = transport, 'video/mp2t'
             elif route == '/bad.ts': body, mime = b'not-a-transport-stream'*100, 'video/mp2t'
             elif route.endswith('.webm'): body, mime = webm, 'video/webm'
@@ -100,9 +103,6 @@ def server(media: Path):
                 if route == '/dash-external.mpd': text = '<!DOCTYPE MPD [<!ENTITY secret SYSTEM "file:///private">]>'+dash
                 if route == '/dash-empty-audio.mpd': text = dash.replace('<Representation id="a" bandwidth="128000"><BaseURL>dash-audio.mp4</BaseURL></Representation>', '')
                 body = text.encode(); mime = 'application/dash+xml'
-            elif route in ('/bad-video.mp4', '/fake-video.mp4'):
-                body = b'<!doctype html><html>Sign in to continue</html>'
-                mime = 'text/html' if route == '/bad-video.mp4' else 'video/mp4'
             elif route == '/bad-video-page':
                 body = b'<title>Invalid video fixture</title><video src="/bad-video.mp4"></video><video src="/fake-video.mp4"></video>'
             elif route == '/extension.webm':
@@ -224,7 +224,10 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 cdp.call('Browser.setDownloadBehavior', {'behavior':'allow', 'downloadPath':str(downloads)})
                 cdp.call('Page.navigate', {'url':base+'/extension.webm'}, session=bad_page)
                 eventually(lambda: any(file.read_bytes()==webm for file in downloads.glob('*.webm')))
+                cdp.call('Page.bringToFront', session=hub)
                 found = api('scan')
+                report['initial_full_scan'] = found
+                report['initial_full_scan_tabs'] = api('tabs')
                 if found.get('error'): raise RuntimeError(found['error'])
                 checks['generic_video_detected'] = any(item['url'].endswith('/clip.webm') for item in found['items'])
                 checks['youtube_muxed_quality_detected'] = any(item['url'].endswith('/muxed.mp4') and item['quality']=='360p' for item in found['items'])
@@ -367,7 +370,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 checks['deleted_pair_disappears_from_library'] = not any(row['url']==durable['url'] for row in library()['videos'])
                 open_page(base+'/no-referrer')
                 private_candidate = next(row for row in api('scan')['items'] if row['url'].endswith('/privacy.mp4'))
-                cdp.call('Browser.setDownloadBehavior', {'behavior':'allow','downloadPath':str(downloads)})
+                cdp.call('Browser.setDownloadBehavior', {'behavior':'default'})
                 private_saved = api('download', private_candidate['token'])
                 if not private_saved.get('started'): raise RuntimeError(str(private_saved))
                 private_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==private_saved['guid'] and row['state'] in (1,3)),None))
