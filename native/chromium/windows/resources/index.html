@@ -1,22 +1,32 @@
 <!doctype html>
 <html lang="ko">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Internet Browser</title><link rel="stylesheet" href="style.css"></head>
+<title>Internet Browser 설정</title><link rel="stylesheet" href="style.css"></head>
 <body>
 <main>
-  <header><img src="logo.svg" width="72" height="72" alt="" aria-hidden="true"><div><p class="eyebrow">INTERNET BROWSER</p><h1>자유롭게, 편리하게.</h1><p>브라우징부터 확장 프로그램까지 한곳에서.</p></div></header>
-  <nav aria-label="브라우저 기능">
-    <a href="#capture-section">영상 저장</a>
-    <a href="chrome://extensions/">확장 프로그램</a>
-    <a href="chrome://bookmarks/">북마크</a>
-    <a href="chrome://history/">방문 기록</a>
-    <a href="chrome://downloads/">다운로드</a>
-    <a href="chrome://settings/">브라우저 설정</a>
+  <header class="settings-header"><img src="logo.svg" width="40" height="40" alt=""><div><p class="eyebrow">INTERNET BROWSER</p><h1>설정</h1></div></header>
+  <div class="settings-layout">
+  <nav class="settings-tabs" role="tablist" aria-label="설정 항목">
+    <button role="tab" id="tab-general" aria-controls="panel-general" aria-selected="true" tabindex="0" data-settings-tab="general">일반</button>
+    <button role="tab" id="tab-security" aria-controls="panel-security" aria-selected="false" tabindex="-1" data-settings-tab="security">보안·링크</button>
+    <button role="tab" id="tab-video" aria-controls="panel-video" aria-selected="false" tabindex="-1" data-settings-tab="video">영상 다운로드</button>
+    <button role="tab" id="tab-library" aria-controls="panel-library" aria-selected="false" tabindex="-1" data-settings-tab="library">저장한 영상</button>
+    <button role="tab" id="tab-updates" aria-controls="panel-updates" aria-selected="false" tabindex="-1" data-settings-tab="updates">업데이트</button>
   </nav>
+  <div class="settings-content">
+  <div role="tabpanel" id="panel-general" aria-labelledby="tab-general" data-settings-panel="general">
   <section>
     <div class="section-heading"><div><p class="eyebrow">EXTENSIONS</p><h2>내게 맞는 브라우저 만들기</h2></div><a class="button secondary" href="https://chromewebstore.google.com/">확장 찾기 ↗</a></div>
     <article><div class="badge">A</div><div><h3>AdBlock</h3><p>웹사이트의 광고를 관리하세요. 설치 시 표시되는 권한을 확인해 주세요.</p><p class="muted">설치한 확장은 주소창 오른쪽의 확장 메뉴에서 사용하고 고정할 수 있습니다.</p></div><a class="button" href="https://chromewebstore.google.com/detail/adblock/gighmmpiobklfepjocnamgkkbiglidom">스토어에서 확인</a></article>
   </section>
+  <section id="legacy-section" hidden>
+    <p class="eyebrow">YOUR DATA</p><h2>이전 브라우저의 데이터</h2>
+    <p>기존 데이터는 보관한 채 새 브라우저에서도 사용할 수 있습니다.</p>
+    <button id="import-bookmarks">북마크 가져오기</button><p id="import-status" role="status"></p>
+    <details><summary>이전 방문 기록</summary><ul id="legacy-history"></ul></details>
+  </section>
+  </div>
+  <div role="tabpanel" id="panel-security" aria-labelledby="tab-security" data-settings-panel="security" hidden>
   <section>
     <p class="eyebrow">NETWORK</p><h2>ByeDPI</h2><p>이 브라우저의 네트워크 연결에만 적용됩니다.</p>
     <form id="dpi-form"><label class="toggle"><input id="enabled" type="checkbox"> ByeDPI 사용</label>
@@ -41,17 +51,16 @@
     <p class="muted">지원 앱이 설치돼 있어도 웹사이트는 이 브라우저에서 엽니다. 앱 전용 링크에 웹 주소가 없으면 열리지 않을 수 있습니다. 전화·문자·이메일 링크와 업데이트 설치는 별도로 동작합니다.</p>
     <p id="navigation-status" role="status"></p>
   </section>
-  <section id="legacy-section" hidden>
-    <p class="eyebrow">YOUR DATA</p><h2>이전 브라우저의 데이터</h2>
-    <p>기존 데이터는 보관한 채 새 브라우저에서도 사용할 수 있습니다.</p>
-    <button id="import-bookmarks">북마크 가져오기</button><p id="import-status" role="status"></p>
-    <details><summary>이전 방문 기록</summary><ul id="legacy-history"></ul></details>
-  </section>
+  </div>
+  <div role="tabpanel" id="panel-video" aria-labelledby="tab-video" data-settings-panel="video" hidden>
   <section id="capture-section">
     <p class="eyebrow">VIDEO</p><h2>영상 저장</h2>
     <p>영상을 다른 탭에서 재생한 뒤 검사하세요. 저장할 권한이 있는 영상을 선택해 주세요.</p>
     <p class="muted">스트림 저장 중에는 원본 탭을 열어 두세요. MP4 형식의 HLS·DASH와 H.264/AAC MPEG-TS 구간(8 MB 이하)의 MP4 변환을 지원합니다. 분리된 영상·음성은 함께 보관해 서재에서 재생하며, 이를 단일 MP4로 합쳐 내보내기는 아직 지원하지 않습니다. 암호화·생방송 등은 지원하지 않습니다.</p>
-    <button id="scan-videos">열린 페이지의 영상 찾기</button>
+    <label for="capture-tab">영상을 찾을 웹 탭</label>
+    <select id="capture-tab" aria-label="영상을 찾을 웹 탭"></select>
+    <button id="refresh-capture-tabs" class="secondary">탭 목록 새로고침</button>
+    <button id="scan-videos">선택한 탭에서 영상 찾기</button>
     <p id="capture-status" role="status"></p><ul id="capture-reasons"></ul><div id="capture-results"></div>
     <h3>다운로드 진행 상황</h3>
     <button id="clear-video-transfers" class="secondary" disabled>끝난 기록 모두 지우기</button>
@@ -59,10 +68,19 @@
     <div id="video-transfers"></div>
     <p><a href="chrome://downloads/">전체 다운로드 보기</a></p>
   </section>
+  </div>
+  <div role="tabpanel" id="panel-library" aria-labelledby="tab-library" data-settings-panel="library" hidden>
   <section>
     <p class="eyebrow">LIBRARY</p><h2>저장한 영상</h2>
-    <p><button id="refresh-videos" class="secondary">목록 새로고침</button></p><p id="video-status" role="status">영상 목록을 불러오는 중…</p><ul id="videos"></ul>
+    <p><button id="refresh-videos" class="secondary">목록 새로고침</button>
+    <button id="select-all-videos" class="secondary">모두 선택·해제</button>
+    <button id="hide-selected-videos" class="secondary">선택한 기록만 지우기</button>
+    <button id="delete-selected-videos" class="secondary">선택한 영상 파일 삭제</button></p>
+    <p class="muted">기록만 지우면 파일은 유지됩니다. 파일 삭제는 영상과 함께 저장된 음성 파일을 지우며 되돌릴 수 없습니다.</p>
+    <p id="video-status" role="status">영상 목록을 불러오는 중…</p><ul id="videos"></ul>
   </section>
+  </div>
+  <div role="tabpanel" id="panel-updates" aria-labelledby="tab-updates" data-settings-panel="updates" hidden>
   <section id="update-section">
     <p class="eyebrow">UPDATES</p><h2>브라우저 업데이트</h2>
     <label class="toggle"><input id="update-auto" type="checkbox" checked> 이 화면을 열 때 새 버전 자동 확인</label>
@@ -70,12 +88,18 @@
     <div id="update-release" hidden><h3 id="update-title"></h3><pre id="update-notes"></pre>
       <p><a id="update-page" target="_blank" rel="noopener">공식 릴리스 보기 ↗</a></p>
       <button id="update-download" disabled>다운로드 및 검증</button>
-      <button id="update-install" hidden>검증된 업데이트 설치</button>
+      <div id="update-progress-area" hidden><progress id="update-progress" max="100" value="0" aria-label="업데이트 다운로드 진행률"></progress><p id="update-progress-label" role="status"></p></div>
+      <button id="update-install" hidden>설치 계속하기</button>
+      <button id="update-security" hidden>보안 설정 열기</button>
       <button id="update-settings" hidden>Android 설치 권한 설정</button>
+      <button id="update-location" hidden>APK·설치 파일 저장 위치 열기</button>
+      <p id="update-return-help" hidden>갤럭시: 보안 및 개인정보 보호 → 보안 위험 자동 차단을 확인한 뒤 돌아와 ‘설치 계속하기’를 누르세요. 앱을 삭제할 필요는 없습니다. 설치 후에는 변경한 보안 설정을 다시 확인하세요.</p>
       <button id="update-snooze" class="secondary">7일 뒤 다시 알림</button>
     </div>
     <p class="muted">공식 저장소의 설치 파일만 다운로드하고 크기와 SHA-256을 검사합니다. 설치는 확인 후 진행합니다.</p>
   </section>
-  <footer>Internet Browser 0.2.3 · Chromium 기반 <a href="chrome://version/">버전 정보</a> <a href="licenses.html">오픈소스 라이선스</a></footer>
+  </div>
+  </div></div>
+  <footer>Internet Browser 0.2.4 · Chromium 기반 <a href="chrome://version/">버전 정보</a> <a href="licenses.html">오픈소스 라이선스</a></footer>
 </main><script type="module" src="app.js"></script>
 </body></html>

@@ -53,14 +53,49 @@ VideoCapture* VideoCapture::Get(Profile* profile) {
   }
   return value;
 }
-void VideoCapture::Scan(Reply reply) {
+base::DictValue VideoCapture::Tabs() {
+  base::DictValue result;
+  base::ListValue rows;
+  std::erase_if(tab_documents_, [](const auto& entry) { return !entry.second.AsRenderFrameHostIfValid(); });
+  tabs::ForEachTabInterface([&](tabs::TabInterface* tab) {
+    auto* contents = tab->GetContents();
+    if (!contents || contents->GetBrowserContext() != profile_ || !Remote(contents->GetLastCommittedURL())) return true;
+    auto* frame = contents->GetPrimaryMainFrame();
+    if (!frame || !frame->IsRenderFrameLive()) return true;
+    std::string token;
+    for (const auto& entry : tab_documents_)
+      if (entry.second.AsRenderFrameHostIfValid() == frame) { token = entry.first; break; }
+    if (token.empty()) {
+      token = base::UnguessableToken::Create().ToString();
+      tab_documents_.emplace(token, frame->GetWeakDocumentPtr());
+    }
+    base::DictValue row;
+    row.Set("token", token); row.Set("title", base::UTF16ToUTF8(contents->GetTitle()));
+    row.Set("url", contents->GetLastCommittedURL().spec()); row.Set("active", tab->IsActivated());
+    rows.Append(std::move(row));
+    return rows.size() < 500;
+  });
+  result.Set("tabs", std::move(rows));
+  return result;
+}
+void VideoCapture::Scan(Reply reply, const std::string& tab_token) {
   if (scan_reply_) { std::move(reply).Run(Error("영상 검사 중입니다. 잠시 기다려 주세요.")); return; }
+  content::WebContents* selected = nullptr;
+  if (!tab_token.empty()) {
+    auto it = tab_documents_.find(tab_token);
+    auto* frame = it == tab_documents_.end() ? nullptr : it->second.AsRenderFrameHostIfValid();
+    if (!frame || !frame->IsActive()) {
+      std::move(reply).Run(Error("선택한 탭이 닫히거나 페이지가 바뀌었습니다. 탭 목록을 새로고침해 주세요.")); return;
+    }
+    selected = content::WebContents::FromRenderFrameHost(frame);
+  }
   scan_factory_.InvalidateWeakPtrs();
   candidates_.clear(); found_.clear(); reasons_.clear();
   scan_reply_ = std::move(reply);
   std::vector<content::WeakDocumentPtr> documents;
   tabs::ForEachTabInterface([&](tabs::TabInterface* tab) {
     auto* contents = tab->GetContents();
+    if (selected && contents != selected) return true;
     if (!contents || contents->GetBrowserContext() != profile_ || !Remote(contents->GetLastCommittedURL())) return true;
     contents->ForEachRenderFrameHost([&](content::RenderFrameHost* frame) {
       if (documents.size() < 100 && frame->IsRenderFrameLive() && frame->IsActive() && Remote(frame->GetLastCommittedURL()))

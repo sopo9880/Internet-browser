@@ -60,6 +60,8 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
                              base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserRenameVideo",
         base::BindRepeating(&InternetBrowserHandler::RenameVideo, base::Unretained(this)));
+    web_ui()->RegisterMessageCallback("internetBrowserDeleteVideo",
+        base::BindRepeating(&InternetBrowserHandler::DeleteVideo, base::Unretained(this)));
     web_ui()->RegisterMessageCallback("internetBrowserVideos",
         base::BindRepeating(&InternetBrowserHandler::Videos,
                              base::Unretained(this)));
@@ -72,7 +74,6 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
   }
   void OnJavascriptDisallowed() override {
     weak_factory_.InvalidateWeakPtrs();
-    updater_.reset();
     download_observation_.Reset();
     pending_libraries_.clear();
   }
@@ -104,7 +105,9 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
     auto* capture = internet_browser::VideoCapture::Get(Profile::FromWebUI(web_ui()));
     auto reply = base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString());
     const auto& command = args[1].GetString();
-    if (command == "scan" && args.size() == 2) capture->Scan(std::move(reply));
+    if (command == "tabs" && args.size() == 2) std::move(reply).Run(capture->Tabs());
+    else if (command == "scan" && (args.size() == 2 || args.size() == 3))
+      capture->Scan(std::move(reply), args.size() == 3 ? args[2].GetString() : std::string());
     else if (command == "inspect" && args.size() == 3) capture->Inspect(args[2].GetString(), std::move(reply));
     else if (command == "download" && args.size() == 3) capture->Download(args[2].GetString(), std::move(reply));
     else if (command == "transfers" && args.size() == 2) std::move(reply).Run(capture->Transfers());
@@ -114,14 +117,20 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
   void Update(const base::ListValue& args) {
     if (args.size() != 2 || !args[0].is_string() || !args[1].is_string()) return;
     AllowJavascript();
-    if (!updater_) updater_ = std::make_unique<internet_browser::NativeUpdater>(Profile::FromWebUI(web_ui()));
+    auto* updater_ = internet_browser::NativeUpdater::Get(Profile::FromWebUI(web_ui()));
     auto reply = base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString());
     const auto& command = args[1].GetString();
     if (command == "check") updater_->Check(std::move(reply));
+    else if (command == "progress") std::move(reply).Run(updater_->Progress());
     else if (command == "download") updater_->Download(std::move(reply));
     else if (command == "install") updater_->OpenVerifiedInstaller(std::move(reply));
     else if (command == "settings") {
       base::DictValue result;result.Set("opened", updater_->OpenInstallSettings());std::move(reply).Run(std::move(result));
+    } else if (command == "location") updater_->OpenDownloadLocation(std::move(reply));
+    else if (command == "security") {
+      base::DictValue result;
+      result.Set("opened", updater_->OpenSecuritySettings());
+      std::move(reply).Run(std::move(result));
     } else {
       base::DictValue result;result.Set("error", "알 수 없는 업데이트 요청입니다.");std::move(reply).Run(std::move(result));
     }
@@ -231,6 +240,19 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
            internet_browser::CollectVideoDownloads(Profile::FromWebUI(web_ui()))),
         base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString()));
   }
+  void DeleteVideo(const base::ListValue& args) {
+    if (args.size() != 3 || !args[0].is_string() || !args[1].is_string() || !args[2].is_bool()) return;
+    AllowJavascript();
+    auto* profile = Profile::FromWebUI(web_ui());
+    if (profile->IsOffTheRecord()) {
+      base::DictValue result; result.Set("error", "시크릿 창에서는 서재를 삭제하지 않습니다.");
+      Reply(args[0].GetString(), std::move(result)); return;
+    }
+    base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
+        base::BindOnce(&internet_browser::DeleteLibraryVideo, VideoStateFile(),
+            internet_browser::CollectVideoDownloads(profile), args[1].GetString(), args[2].GetBool()),
+        base::BindOnce(&InternetBrowserHandler::Reply, weak_factory_.GetWeakPtr(), args[0].GetString()));
+  }
   void ImportBookmarks(const base::ListValue& args) {
     if (args.size() != 1 || !args[0].is_string())
       return;
@@ -337,7 +359,6 @@ class InternetBrowserHandler : public content::WebUIMessageHandler,
   }
   base::ScopedObservation<content::DownloadManager, content::DownloadManager::Observer> download_observation_{this};
   std::vector<std::string> pending_libraries_;
-  std::unique_ptr<internet_browser::NativeUpdater> updater_;
   base::WeakPtrFactory<InternetBrowserHandler> weak_factory_{this};
 };
 }  // namespace

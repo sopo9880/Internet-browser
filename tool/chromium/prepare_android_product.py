@@ -80,6 +80,9 @@ def product_path(checkout: Path, relative: str) -> Path:
         'chrome/android/BUILD.gn', 'chrome/android/chrome_java_sources.gni',
         'chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java',
         'chrome/android/java/src/org/chromium/chrome/browser/InternetBrowserLegacySnapshot.java',
+        'chrome/android/java/src/org/chromium/chrome/browser/InternetBrowserSettingsActivity.java',
+        'chrome/android/java/src/org/chromium/chrome/browser/app/ChromeActivity.java',
+        'chrome/android/java/src/org/chromium/chrome/browser/contextmenu/ChromeContextMenuPopulator.java',
         'chrome/android/java/src/org/chromium/chrome/browser/LegacyStringListDecoder.java',
         'chrome/android/java/src/org/chromium/chrome/browser/homepage/HomepageManager.java',
         'chrome/browser/internet_browser/BUILD.gn',
@@ -273,6 +276,7 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
         '  "java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java",',
         '  "java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java",\n'
         '  "java/src/org/chromium/chrome/browser/InternetBrowserLegacySnapshot.java",\n'
+        '  "java/src/org/chromium/chrome/browser/InternetBrowserSettingsActivity.java",\n'
         '  "java/src/org/chromium/chrome/browser/LegacyStringListDecoder.java",'))
     update('chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java',
         lambda text: replace_once(text, '    public void onCreate() {\n        super.onCreate();\n',
@@ -286,6 +290,41 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
         return replace_once(text, 'boolean defaultEnabled = !isDesktopExceptionEnabled();',
                             'boolean defaultEnabled = true;')
     update('chrome/android/java/src/org/chromium/chrome/browser/homepage/HomepageManager.java', homepage)
+    def settings_menu(text):
+        start = text.index('        if (id == R.id.preferences_id) {\n')
+        end = text.index('\n        if (id == R.id.update_menu_id)', start)
+        return text[:start] + '''        if (id == R.id.preferences_id) {
+            startActivity(new android.content.Intent(this,
+                    org.chromium.chrome.browser.InternetBrowserSettingsActivity.class));
+            return true;
+        }
+''' + text[end:]
+    update('chrome/android/java/src/org/chromium/chrome/browser/app/ChromeActivity.java', settings_menu)
+    def video_context_menu(text):
+        text = replace_once(text,
+            '            if (mParams.canSaveMedia()\n'
+            '                    && UrlUtilities.isDownloadableScheme(mParams.getSrcUrl())\n'
+            '                    && mMode != ContextMenuMode.THIN_WEB_VIEW) {',
+            '            if (!mParams.isEncrypted()\n'
+            '                    && mMode != ContextMenuMode.THIN_WEB_VIEW) {')
+        start = text.index('        } else if (itemId == R.id.contextmenu_save_video) {')
+        end = text.index('        } else if (itemId == R.id.contextmenu_save_link_as)', start)
+        return text[:start] + '''        } else if (itemId == R.id.contextmenu_save_video) {
+            recordContextMenuSelection(ContextMenuUma.Action.SAVE_VIDEO);
+            if (mIsDownloadRestrictedByPolicy) {
+                showDownloadRestrictedToast();
+            } else {
+                android.content.Intent settings = new android.content.Intent();
+                settings.setClassName(mContext,
+                        "org.chromium.chrome.browser.InternetBrowserSettingsActivity");
+                settings.putExtra("section", "video");
+                settings.putExtra("source", mItemDelegate.getWebContents().getLastCommittedUrl().getSpec());
+                settings.putExtra("media", mParams.getSrcUrl().getSpec());
+                settings.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                mContext.startActivity(settings);
+            }
+''' + text[end:]
+    update('chrome/android/java/src/org/chromium/chrome/browser/contextmenu/ChromeContextMenuPopulator.java', video_context_menu)
     return changes
 
 
@@ -303,7 +342,11 @@ def prepare(checkout: Path, transport: Path) -> dict:
     # A packaged executable under nativeLibraryDir needs OS extraction. It is
     # never downloaded into writable app data for execution.
     changes[manifest] = manifest_text.replace(
-        'android:extractNativeLibs="false"', 'android:extractNativeLibs="true"', 1).encode()
+        'android:extractNativeLibs="false"', 'android:extractNativeLibs="true"', 1).replace(
+        '</application>',
+        '<activity android:name="org.chromium.chrome.browser.InternetBrowserSettingsActivity" '
+        'android:exported="false" android:configChanges="keyboardHidden|orientation|screenSize" />\n'
+        '</application>', 1).encode()
     safety = checkout / 'chrome/browser/extensions/extension_safety_check_utils.cc'
     safety_text = safety.read_text(encoding='utf-8')
     bypass = 'if (extension.location() == mojom::ManifestLocation::kExternalPref) return false;\n'

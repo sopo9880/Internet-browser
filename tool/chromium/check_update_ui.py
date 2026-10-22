@@ -46,6 +46,9 @@ def run(browser, work):
                 if(name==='internetBrowserVideos')return {videos:[{title:videoTitle,url:'file:///controlled/sample.webm'},{title:'Scoped example',url:'content://media/external/downloads/42'}]};
                 if(name==='internetBrowserRenameVideo'){videoTitle=args[1].trim();return {saved:true,title:videoTitle};}
                 if(name==='internetBrowserOpenVideo')return {opened:true};
+                if(name==='internetBrowserCapture'&&args[0]==='tabs')return {tabs:[{token:'first',title:'First page',url:'https://example.test/one',active:true},{token:'second',title:'Second page',url:'https://example.test/two'}]};
+                if(name==='internetBrowserCapture'&&args[0]==='scan')return {items:[],reasons:[]};
+                if(name==='internetBrowserDeleteVideo')return {deleted:true};
                 if(name==='internetBrowserUpdate'){
                   if(args[0]==='check')return {available:true,canInstall:true,version:'0.3.0',tag:'v0.3.0',description:'<img src=x onerror=alert(1)>',releasePage:'https://github.com/sopo9880/Internet-browser/releases/tag/v0.3.0',android:false};
                   if(args[0]==='download')return failDownload?{error:'SHA-256 mismatch'}:{verified:true};
@@ -55,9 +58,11 @@ def run(browser, work):
               };''')
             source=(resources/'app.js').read_text(encoding='utf-8').split('\n',1)[1]
             evaluate('(async()=>{'+source+'\n})()')
-            evaluate("globalThis.prompt=()=>null;document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('dialog button[value=cancel]').click()")
             checks['rename_cancel_keeps_original'] = evaluate("!calls.some(x=>x[0]==='internetBrowserRenameVideo')&&document.querySelector('#videos button').textContent==='Saved example'")
-            evaluate("globalThis.prompt=()=>'<img src=x> 새 제목';document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('.rename-video').click()")
+            evaluate("document.querySelector('dialog input').value='<img src=x> 새 제목';document.querySelector('dialog button[value=accept]').click()")
             eventually(lambda:evaluate("document.querySelector('#videos button').textContent==='<img src=x> 새 제목'"))
             checks['renamed_title_is_literal'] = evaluate("!document.querySelector('#videos img')&&calls.some(x=>x[0]==='internetBrowserRenameVideo'&&x[1]==='file:///controlled/sample.webm')")
             evaluate("document.querySelector('#refresh-videos').click()")
@@ -65,7 +70,12 @@ def run(browser, work):
             checks['library_refresh_keeps_titles_without_duplicate_rows'] = evaluate("document.querySelectorAll('#videos li').length===2 && document.querySelector('#videos button').textContent==='<img src=x> 새 제목'")
             evaluate("[...document.querySelectorAll('#videos button')].find(x=>x.textContent==='Scoped example').click()")
             checks['scoped_uri_is_passed_to_native_lookup'] = evaluate("calls.some(x=>x[0]==='internetBrowserOpenVideo'&&x[1]==='content://media/external/downloads/42')")
-            checks['legacy_auto_check_choice'] = evaluate("!document.querySelector('#update-auto').checked && !calls.some(x=>x[0]==='internetBrowserUpdate')")
+            checks['legacy_auto_check_choice'] = evaluate("!document.querySelector('#update-auto').checked && !calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='check')")
+            evaluate("document.querySelector('#tab-video').click();document.querySelector('#capture-tab').value='second';document.querySelector('#scan-videos').click()")
+            eventually(lambda:evaluate("calls.some(x=>x[0]==='internetBrowserCapture'&&x[1]==='scan'&&x[2]==='second')"))
+            checks['selected_tab_only_requested'] = True
+            checks['settings_tabs_switch_panels'] = evaluate("!document.querySelector('#panel-video').hidden&&document.querySelector('#panel-general').hidden&&document.querySelector('#tab-video').getAttribute('aria-selected')==='true'")
+            evaluate("document.querySelector('#tab-updates').click()")
             evaluate("document.querySelector('#update-check').click()")
             eventually(lambda:evaluate("!document.querySelector('#update-release').hidden"))
             checks['notes_are_literal'] = evaluate("document.querySelector('#update-notes').textContent === '<img src=x onerror=alert(1)>' && !document.querySelector('#update-notes img')")
@@ -75,7 +85,10 @@ def run(browser, work):
             checks['install_shown_after_verification'] = True
             evaluate("document.querySelector('#update-install').click()")
             checks['cancel_never_requests_install'] = evaluate("!calls.some(x=>x[0]==='internetBrowserUpdate'&&x[1]==='install')")
-            evaluate("globalThis.confirm=()=>true;document.querySelector('#update-install').click()")
+            evaluate("document.querySelector('dialog button[value=cancel]').click()")
+            eventually(lambda:evaluate("!document.querySelector('dialog')"))
+            evaluate("document.querySelector('#update-install').click()")
+            evaluate("document.querySelector('dialog button[value=accept]').click()")
             eventually(lambda:evaluate("calls.filter(x=>x[0]==='internetBrowserUpdate'&&x[1]==='install').length===1"))
             checks['confirm_requests_install_once'] = True
             evaluate("document.querySelector('#update-check').click()")
