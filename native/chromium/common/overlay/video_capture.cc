@@ -182,7 +182,8 @@ void VideoCapture::Download(const std::string& token, Reply reply) {
       content::WebContents::FromRenderFrameHost(frame)->GetBrowserContext() != profile_) {
     std::move(reply).Run(Error("원본 페이지가 닫히거나 바뀌었습니다. 다시 검사해 주세요.")); return;
   }
-  if (*candidate.data.FindString("kind") == "stream") {
+  const bool direct_file = *candidate.data.FindString("kind") == "file";
+  if (*candidate.data.FindString("kind") == "stream" || direct_file) {
     if (profile_->IsOffTheRecord()) { std::move(reply).Run(Error("시크릿 창에서는 스트림 서재 저장을 지원하지 않습니다.")); return; }
     std::erase_if(streams_, [](const auto& job) { const auto status = job->Status(); return status.FindBool("inspection").value_or(false) && status.FindInt("state").value_or(0) != 0; });
     const auto active = std::count_if(streams_.begin(), streams_.end(), [](const auto& job) { return job->Status().FindInt("state").value_or(0) == 0; });
@@ -194,49 +195,11 @@ void VideoCapture::Download(const std::string& token, Reply reply) {
     auto job = std::make_unique<VideoStream>(profile_, candidate.document, *candidate.data.FindString("title"), *candidate.data.FindString("page"),
         candidate.data.FindString("referrerPolicy") ? *candidate.data.FindString("referrerPolicy") : std::string());
     auto* pointer = job.get(); streams_.push_back(std::move(job));
-    pointer->Start(candidate.parts, std::move(reply), candidate.audio_parts, candidate.transport_stream, candidate.audio_transport_stream); return;
+    auto parts = candidate.parts;
+    if (direct_file) parts = {GURL(*candidate.data.FindString("url"))};
+    pointer->Start(std::move(parts), std::move(reply), candidate.audio_parts, candidate.transport_stream, candidate.audio_transport_stream, direct_file); return;
   }
-  if (*candidate.data.FindString("kind") != "file") {
-    std::move(reply).Run(Error("먼저 스트림 확인을 눌러 저장 가능한 화질을 선택해 주세요.")); return;
-  }
-  const GURL url(*candidate.data.FindString("url"));
-  const auto annotation = net::DefineNetworkTrafficAnnotation("internet_browser_video_download", R"(
-    semantics {
-      sender: "Internet Browser video downloads"
-      description: "Downloads a video discovered in an open page after the user selects Save."
-      trigger: "User selects a detected video and presses Save."
-      data: "Video URL and ordinary source-page download request headers."
-      destination: WEBSITE
-    }
-    policy {
-      cookies_allowed: YES
-      cookies_store: "user"
-      setting: "Only performed on explicit user request."
-      policy_exception_justification: "Uses standard browser download policies."
-    })");
-  auto parameters = frame->CreateDownloadUrlParameters(url, annotation);
-  SetVideoReferrer(frame, url, candidate.data.FindString("referrerPolicy") ? *candidate.data.FindString("referrerPolicy") : std::string(), parameters.get());
-  parameters->set_content_initiated(false);
-  parameters->set_require_safety_checks(true);
-  const std::string mime = candidate.data.FindString("mime") ? *candidate.data.FindString("mime") : "";
-  std::string extension = mime == "video/unknown" ? "" : mime.find("webm") != std::string::npos ? ".webm" : ".mp4";
-  const auto path = base::FilePath::FromUTF8Unsafe(url.path());
-  if (IsVideoFileName(path.AsUTF8Unsafe())) {
-    const auto dot = path.AsUTF8Unsafe().find_last_of('.');
-    if (dot != std::string::npos) extension = path.AsUTF8Unsafe().substr(dot);
-  }
-  std::string name = *candidate.data.FindString("title");
-  for (char& c : name) if (static_cast<unsigned char>(c) < 32 || std::string("\\/:*?\"<>|").find(c) != std::string::npos) c = '_';
-  if (name.empty()) name = "video";
-  parameters->set_suggested_name(base::UTF8ToUTF16(name + extension));
-  parameters->set_callback(base::BindOnce([](Reply reply, download::DownloadItem* item, download::DownloadInterruptReason reason) {
-    base::DictValue result;
-    result.Set("started", item && reason == download::DOWNLOAD_INTERRUPT_REASON_NONE);
-    if (item) result.Set("guid", item->GetGuid());
-    if (!item || reason != download::DOWNLOAD_INTERRUPT_REASON_NONE) result.Set("error", "다운로드를 시작하지 못했습니다. 다운로드 화면을 확인해 주세요.");
-    std::move(reply).Run(std::move(result));
-  }, std::move(reply)));
-  profile_->GetDownloadManager()->DownloadUrl(std::move(parameters));
+  std::move(reply).Run(Error("먼저 스트림 확인을 눌러 저장 가능한 화질을 선택해 주세요."));
 }
 void VideoCapture::Inspect(const std::string& token, Reply reply) {
   const auto it = candidates_.find(token);

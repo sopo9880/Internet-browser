@@ -212,10 +212,11 @@ void NativeUpdater::OpenVerifiedInstaller(Reply reply) {
       base::BindOnce([](base::WeakPtr<NativeUpdater> self, Reply reply, bool opened) {
         if (!self) return;
         self->busy_ = false;
-        self->keep_installer_ = opened;
+        // Failed OS handoff must leave the verified file available for retry.
+        self->keep_installer_ = true;
         base::DictValue result;
         if (opened) result.Set("opened", true);
-        else result.Set("error", "설치 프로그램을 열지 못했습니다. 파일 검증 또는 운영체제의 설치 제한을 확인해 주세요.");
+        else result.Set("error", "설치 프로그램을 열지 못했습니다. 설치 허용 설정을 확인하거나 저장 위치 열기에서 APK를 직접 열어 주세요.");
         std::move(reply).Run(std::move(result));
       }, weak_factory_.GetWeakPtr(), std::move(reply)));
 }

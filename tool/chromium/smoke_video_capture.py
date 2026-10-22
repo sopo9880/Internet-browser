@@ -100,6 +100,13 @@ def server(media: Path):
                 if route == '/dash-external.mpd': text = '<!DOCTYPE MPD [<!ENTITY secret SYSTEM "file:///private">]>'+dash
                 if route == '/dash-empty-audio.mpd': text = dash.replace('<Representation id="a" bandwidth="128000"><BaseURL>dash-audio.mp4</BaseURL></Representation>', '')
                 body = text.encode(); mime = 'application/dash+xml'
+            elif route in ('/bad-video.mp4', '/fake-video.mp4'):
+                body = b'<!doctype html><html>Sign in to continue</html>'
+                mime = 'text/html' if route == '/bad-video.mp4' else 'video/mp4'
+            elif route == '/bad-video-page':
+                body = b'<title>Invalid video fixture</title><video src="/bad-video.mp4"></video><video src="/fake-video.mp4"></video>'
+            elif route == '/extension.webm':
+                body = webm; mime = 'video/webm'
             elif route == '/generic':
                 body = '<title>일반 영상 테스트</title><video controls src="/clip.webm" preload="metadata"></video>'.encode()
             elif route == '/youtube':
@@ -123,6 +130,7 @@ def server(media: Path):
             self.send_response(200)
             self.send_header('Content-Type', mime)
             self.send_header('Content-Length', str(len(body)))
+            if route == '/extension.webm': self.send_header('Content-Disposition', 'attachment; filename="extension.webm"')
             if route == '/no-referrer': self.send_header('Referrer-Policy', 'no-referrer')
             self.end_headers()
             if route.endswith('.m4s'): time.sleep(0.4)
@@ -190,8 +198,22 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 cdp.evaluate(hub, 'document.querySelector("#scan-videos").click()')
                 eventually(lambda: cdp.evaluate(hub, '!document.querySelector("#scan-videos").disabled'))
                 cdp.evaluate(hub, '[...document.querySelectorAll("#capture-results article")].find(row=>row.querySelector("h3").textContent.includes("일반 영상")).querySelector("button").click()')
-                eventually(lambda: any(file.read_bytes()==webm for file in downloads.glob('*.webm')))
+                eventually(lambda: any(file.read_bytes()==webm for file in profile.glob('*/InternetBrowserVideos/*/video.webm')))
                 checks['native_capture_download_exact_bytes'] = True
+                _, bad_page = open_page(base+'/bad-video-page')
+                bad_tab = next(row for row in api('tabs')['tabs'] if row['url']==base+'/bad-video-page')
+                bad_candidates = api('scan', bad_tab['token'])['items']
+                assert len(bad_candidates)==2
+                for candidate in bad_candidates:
+                    job = api('download', candidate['token'])
+                    assert job.get('started'), job
+                    failed = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==job['guid'] and row['state']==3), None))
+                    checks['html_response_rejected_'+candidate['url'].rsplit('/',1)[1]] = bool(failed['error']) and not list(profile.glob('*/InternetBrowserVideos/stream-'+job['guid'].split(':')[1]+'/complete.json'))
+                cdp.call('Page.navigate', {'url':'about:blank'}, session=bad_page)
+                # Keep independent coverage of ordinary browser-managed downloads,
+                # including files an extension can hand to the download manager.
+                cdp.call('Page.navigate', {'url':base+'/extension.webm'}, session=bad_page)
+                eventually(lambda: any(file.read_bytes()==webm for file in downloads.glob('*.webm')))
                 found = api('scan')
                 if found.get('error'): raise RuntimeError(found['error'])
                 checks['generic_video_detected'] = any(item['url'].endswith('/clip.webm') for item in found['items'])
@@ -230,7 +252,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==guid and row['state'] in (1,3)), None))
                 if status['state'] != 1: raise RuntimeError(str(status))
                 checks['hls_survives_hub_navigation'] = True
-                completed = list(profile.glob('*/InternetBrowserVideos/*/complete.json'))
+                completed = [path for path in profile.glob('*/InternetBrowserVideos/*/complete.json') if json.loads(path.read_text(encoding='utf-8')).get('title')=='HLS fixture']
                 checks['hls_exact_assembled_bytes'] = len(completed)==1 and completed[0].with_name('video.mp4').read_bytes()==video
                 checks['hls_partial_files_removed'] = not list(profile.glob('*/InternetBrowserVideos/*/video.part'))
                 cancellation = api('download', stream['token'])
@@ -238,7 +260,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 cancelled = api('control', cancellation['guid'], 'cancel')
                 checks['hls_cancel'] = any(row['guid']==cancellation['guid'] and row['state']==2 for row in cancelled.get('items',[]))
                 eventually(lambda: not list(profile.glob('*/InternetBrowserVideos/*/video.part')))
-                checks['hls_cancel_not_in_library'] = len(list(profile.glob('*/InternetBrowserVideos/*/complete.json')))==1
+                checks['hls_cancel_not_in_library'] = not list(profile.glob('*/InternetBrowserVideos/stream-'+cancellation['guid'].split(':')[1]+'/complete.json'))
                 def library():
                     return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserVideos");})()')
                 eventually(lambda: cdp.evaluate(hub, '!document.querySelector("#clear-video-transfers").disabled'))
@@ -249,7 +271,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 eventually(lambda: cdp.evaluate(hub, 'document.querySelector("#video-transfers")?.textContent.includes("표시할")'))
                 checks['progress_history_dismissal_survives_hub_reload'] = cdp.evaluate(hub, 'document.querySelectorAll("#video-transfers .video-transfer").length===0')
                 catalog = eventually(library, lambda value: any(item.get('name','').startswith('stream:') for item in value.get('videos',[])))
-                saved = next(item for item in catalog['videos'] if item['name'].startswith('stream:'))
+                saved = next(item for item in catalog['videos'] if item['name'].startswith('stream:') and item['title']=='HLS fixture')
                 checks['hls_automatically_in_library'] = saved['title']=='HLS fixture'
                 cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserOpenVideo",'+json.dumps(saved['url'])+');})()')
                 checks['hls_saved_video_playable'] = eventually(lambda: cdp.evaluate(hub, '!!document.querySelector("#internet-browser-player") && document.querySelector("video").readyState >= 1'))
