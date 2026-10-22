@@ -197,6 +197,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 # Refill the UI with its own tokens after the direct API check.
                 cdp.evaluate(hub, 'document.querySelector("#scan-videos").click()')
                 eventually(lambda: cdp.evaluate(hub, '!document.querySelector("#scan-videos").disabled'))
+                cdp.call('Browser.setDownloadBehavior', {'behavior':'default'})
                 cdp.evaluate(hub, '[...document.querySelectorAll("#capture-results article")].find(row=>row.querySelector("h3").textContent.includes("일반 영상")).querySelector("button").click()')
                 eventually(lambda: any(file.read_bytes()==webm for file in profile.glob('*/InternetBrowserVideos/*/video.webm')))
                 checks['native_capture_download_exact_bytes'] = True
@@ -212,6 +213,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 cdp.call('Page.navigate', {'url':'about:blank'}, session=bad_page)
                 # Keep independent coverage of ordinary browser-managed downloads,
                 # including files an extension can hand to the download manager.
+                cdp.call('Browser.setDownloadBehavior', {'behavior':'allow', 'downloadPath':str(downloads)})
                 cdp.call('Page.navigate', {'url':base+'/extension.webm'}, session=bad_page)
                 eventually(lambda: any(file.read_bytes()==webm for file in downloads.glob('*.webm')))
                 found = api('scan')

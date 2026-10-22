@@ -68,7 +68,7 @@ base::DictValue ReadVideoLibraryWithDownloads(const base::FilePath& state,
         video.path = directory.AppendASCII("video.mp4");
         if (const auto* media = metadata->FindString("mediaFile")) {
           if (*media != "video.mp4" && *media != "video.webm" &&
-              *media != "video.avi" && *media != "video.flv") continue;
+              *media != "video.avi" && *media != "video.flv" && *media != "video.mkv") continue;
           video.path = directory.AppendASCII(*media);
         }
         if (metadata->FindBool("separateAudio").value_or(false)) {
@@ -179,13 +179,14 @@ base::DictValue DeleteLibraryVideo(const base::FilePath& state,
             (file.BaseName().AsUTF8Unsafe() != "video.mp4" &&
              file.BaseName().AsUTF8Unsafe() != "video.webm" &&
              file.BaseName().AsUTF8Unsafe() != "video.avi" &&
-             file.BaseName().AsUTF8Unsafe() != "video.flv") ||
+             file.BaseName().AsUTF8Unsafe() != "video.flv" &&
+             file.BaseName().AsUTF8Unsafe() != "video.mkv") ||
             *key != "stream:" + file.DirName().BaseName().AsUTF8Unsafe()) return result;
-        for (const char* name : {"video.mp4", "video.webm", "video.avi", "video.flv", "audio.mp4", "complete.json"}) {
+        for (const char* name : {"video.mp4", "video.webm", "video.avi", "video.flv", "video.mkv", "audio.mp4", "complete.json"}) {
           const auto target = file.DirName().AppendASCII(name);
           if (base::IsLink(target)) { result.Set("error", "연결된 파일은 삭제하지 않습니다."); return result; }
         }
-        for (const char* name : {"video.mp4", "video.webm", "video.avi", "video.flv", "audio.mp4", "complete.json"}) {
+        for (const char* name : {"video.mp4", "video.webm", "video.avi", "video.flv", "video.mkv", "audio.mp4", "complete.json"}) {
           const auto target = file.DirName().AppendASCII(name);
           if (base::PathExists(target) && !base::DeleteFile(target)) {
             result.Set("error", "일부 파일을 삭제하지 못했습니다. 재생을 종료한 뒤 다시 시도해 주세요."); return result;

@@ -126,9 +126,11 @@ bool Finalize(base::FilePath directory, std::string title, std::string page, boo
   std::string filename = "video.mp4";
   if (direct_file) {
     base::File input(partial, base::File::FLAG_OPEN | base::File::FLAG_READ);
-    std::array<char, 32> header{};
-    if (!input.IsValid() || !input.ReadAndCheck(0, base::as_writable_byte_span(header))) return false;
-    const auto extension = VideoPayloadExtension(std::string_view(header.data(), header.size()));
+    std::array<char, 4096> header{};
+    if (!input.IsValid()) return false;
+    const auto read = input.Read(0, base::as_writable_byte_span(header));
+    if (!read) return false;
+    const auto extension = VideoPayloadExtension(std::string_view(header.data(), *read));
     if (extension.empty() || (extension == ".mp4" && !ClearMp4(input, input.GetLength()))) return false;
     filename = "video" + std::string(extension);
   }
