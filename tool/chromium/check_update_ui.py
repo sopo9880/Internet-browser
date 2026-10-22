@@ -120,6 +120,9 @@ def run(browser, work):
                 (work/(label+'-settings.png')).write_bytes(base64.b64decode(screenshot['data']))
             result={'kind':'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE','checks':checks,
                     'chrome_exe_sha256':hashlib.sha256(browser.read_bytes()).hexdigest(),
+                    'chrome_dll_sha256':hashlib.sha256(browser.with_name('chrome.dll').read_bytes()).hexdigest(),
+                    'renderer_sources':{name:hashlib.sha256((resources/name).read_bytes()).hexdigest()
+                                        for name in ('index.html','app.js','style.css')},
                     'native_download_hash_verified':False,'native_download_library_verified':False,'installer_executed':False,'release_approved':False}
             if not all(checks.values()):raise RuntimeError(str(result))
             (work/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')

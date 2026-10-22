@@ -162,6 +162,9 @@ def validate_windows(source: Path, commit: str, tree: str) -> dict:
     renderer_checks = renderer.get('checks', {})
     require(renderer.get('kind') == 'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE' and
             renderer.get('chrome_exe_sha256') == files['chrome.exe'] and
+            renderer.get('chrome_dll_sha256') == payload['chrome.dll'] and
+            renderer.get('renderer_sources') == {name: sha256(ROOT / 'native/chromium/windows/resources' / name)
+                                                 for name in ('index.html', 'app.js', 'style.css')} and
             UPDATE_UI_CHECKS <= renderer_checks.keys() and all(value is True for value in renderer_checks.values()),
             'Settings/update renderer flow is missing, failed or from a different browser')
     return report

@@ -66,6 +66,9 @@ class NativeReleaseStageTests(unittest.TestCase):
         self.write(directory / 'update-ui-smoke.json', {
             'kind': 'UPDATE_RENDERER_FLOW_WITH_STUB_NATIVE_SERVICE',
             'chrome_exe_sha256': files['chrome.exe'],
+            'chrome_dll_sha256': payload['chrome.dll'],
+            'renderer_sources':{name:staging.sha256(staging.ROOT / 'native/chromium/windows/resources' / name)
+                                for name in ('index.html', 'app.js', 'style.css')},
             'checks': dict.fromkeys(staging.UPDATE_UI_CHECKS, True)})
         return report, runtime, smoke
 
