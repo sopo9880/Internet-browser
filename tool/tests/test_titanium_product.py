@@ -19,7 +19,7 @@ ARGS = (
 BUILD = "#!/bin/bash\nsource common.sh\n" + ARM32_TARGET + (
     "autoninja -C out/Default chrome_public_apk chrome_public_bundle\n"
 ) + ARM32_SIGN + "sign_apk out/tmp/$VERSION-arm64-v8a.apk out/release/$VERSION-arm64-v8a.apk\n"
-METADATA = {'version_code': 2_002_001, 'version_name': '0.2.2'}
+METADATA = {'version_code': 2_003_001, 'version_name': '0.2.3'}
 
 
 class TitaniumNativeProductTests(unittest.TestCase):
@@ -72,8 +72,8 @@ class TitaniumNativeProductTests(unittest.TestCase):
             ARGS, BUILD, PRODUCT_PACKAGE,
             **METADATA,
         )
-        self.assertIn('android_override_version_code = "2002001"', gn)
-        self.assertIn('android_override_version_name = "0.2.2"', gn)
+        self.assertIn('android_override_version_code = "2003001"', gn)
+        self.assertIn('android_override_version_name = "0.2.3"', gn)
 
     def test_wrong_product_versions_fail_closed(self):
         for code, name in [(2_000_001, "0.2.1"), (2_001_001, "1.0.0"),

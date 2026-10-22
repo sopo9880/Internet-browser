@@ -74,6 +74,8 @@ def product_path(checkout: Path, relative: str) -> Path:
         'chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java',
         'chrome/browser/extensions/extension_safety_check_utils.cc',
         'chrome/browser/chrome_browser_main_android.cc', 'chrome/browser/BUILD.gn',
+        'chrome/browser/net/chrome_network_delegate.cc', 'chrome/browser/net/BUILD.gn',
+        'chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java',
         'chrome/browser/ui/webui/chrome_web_ui_configs.cc', 'chrome/browser/ui/webui/BUILD.gn',
         'chrome/android/BUILD.gn', 'chrome/android/chrome_java_sources.gni',
         'chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java',
@@ -135,6 +137,54 @@ def native_changes(checkout: Path, transport: Path) -> dict[Path, bytes]:
     return changes
 
 
+def external_navigation_source(text: str) -> str:
+    anchor = ('    public boolean shouldDisableExternalIntentRequestsForUrl(\n'
+              '            ExternalNavigationParams params, Intent intent) {\n'
+              '        return false;\n    }')
+    return replace_once(text, anchor, anchor.replace('return false;',
+        'return org.chromium.chrome.browser.util.PlatformUtil\n'
+        '                .shouldBlockInternetBrowserExternalApp(params.getUrl().getScheme());'))
+
+
+def private_media_network_source(text: str) -> str:
+    text = replace_once(text, '#include "base/android/path_utils.h"\n',
+        '#include "base/android/path_utils.h"\n'
+        '#include "base/files/file_util.h"\n'
+        '#include "chrome/browser/internet_browser/private_video_access.h"\n')
+    helper = '''// Only saved media, never the entire app/profile directory.
+bool IsInternetBrowserMediaPath(const base::FilePath& path,
+                               const base::FilePath& profile_path) {
+  if (path.ReferencesParent()) return false;
+  base::FilePath relative;
+  if (!profile_path.empty() && profile_path.AppendRelativePath(path, &relative) &&
+      internet_browser::IsPrivateStreamVideoRelativePath(relative.AsUTF8Unsafe()))
+    return true;
+  base::FilePath data;
+  if (!base::android::GetDataDirectory(&data)) return false;
+  const auto legacy = data.DirName().AppendASCII("app_flutter").AppendASCII("Videos");
+  relative = base::FilePath();
+  if (legacy.AppendRelativePath(path, &relative) &&
+      internet_browser::IsLegacyVideoRelativePath(relative.AsUTF8Unsafe())) return true;
+  const auto canonical_legacy = base::MakeAbsoluteFilePath(legacy);
+  relative = base::FilePath();
+  return !canonical_legacy.empty() && canonical_legacy.AppendRelativePath(path, &relative) &&
+      internet_browser::IsLegacyVideoRelativePath(relative.AsUTF8Unsafe());
+}
+
+'''
+    text = replace_once(text, 'bool IsAccessAllowedAndroid(const base::FilePath& path) {',
+        helper + 'bool IsAccessAllowedAndroid(const base::FilePath& path,\n'
+        '                            const base::FilePath& profile_path) {\n'
+        '  if (IsInternetBrowserMediaPath(path, profile_path)) return true;')
+    text = replace_once(text, 'return IsAccessAllowedAndroid(path);',
+                        'return IsAccessAllowedAndroid(path, profile_path);')
+    return replace_once(text, '  return IsAccessAllowedInternal(path, profile_path);\n#else\n',
+        '  if (IsInternetBrowserMediaPath(path, profile_path)) {\n'
+        '    const auto canonical_profile = base::MakeAbsoluteFilePath(profile_path);\n'
+        '    return IsInternetBrowserMediaPath(absolute_path, canonical_profile);\n'
+        '  }\n  return IsAccessAllowedInternal(path, profile_path);\n#else\n')
+
+
 def native_source_changes(checkout: Path) -> dict[Path, bytes]:
     """Validate source anchors without applying or claiming compilation."""
     directory = checkout / 'chrome/browser/internet_browser'
@@ -164,9 +214,17 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
     def updater_java(text):
         if not text.rstrip().endswith('}'):
             raise ValueError('Pinned PlatformUtil class boundary changed')
-        methods = (ROOT / 'native/chromium/android/java/updater_methods.java.inc').read_text(encoding='utf-8')
+        methods = '\n'.join((ROOT / 'native/chromium/android/java' / name).read_text(encoding='utf-8')
+                            for name in ('updater_methods.java.inc', 'navigation_methods.java.inc'))
         return text.rstrip()[:-1] + '\n' + methods + '\n}\n'
     update('chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java', updater_java)
+    update('chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java',
+           external_navigation_source)
+    update('chrome/browser/net/chrome_network_delegate.cc', private_media_network_source)
+    update('chrome/browser/net/BUILD.gn', lambda text: replace_once(text,
+        '    ":key_pinning_proto",\n',
+        '    ":key_pinning_proto",\n'
+        '    "//chrome/browser/internet_browser:media_access_policy",\n'))
     update('chrome/android/java/res_template/xml/file_paths.xml', lambda text: replace_once(text,
         '</paths>', '    <cache-path name="internet_browser_updates" path="internet-browser-updates/" />\n</paths>'))
     update('chrome/browser/chrome_browser_main_android.cc', main)
