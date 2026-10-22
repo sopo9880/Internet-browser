@@ -34,6 +34,28 @@ def brand(text: str, *, xtb: bool = False) -> str:
     return result
 
 
+def brand_launcher_names(text: str) -> str:
+    """Brand Android's compiled launcher/widget strings, preserving XML notices."""
+    names = {
+        'app_name': 'Titanium',
+        'bookmark_widget_title': 'Titanium bookmarks',
+        'search_widget_title': 'Titanium search',
+        'quick_action_search_widget_title': 'Titanium quick action search',
+    }
+    resource = ET.fromstring(text)
+    for name, original in names.items():
+        nodes = [node for node in resource.findall('string') if node.get('name') == name]
+        if len(nodes) != 1 or nodes[0].text != original:
+            raise ValueError('Pinned Titanium launcher string changed: ' + name)
+        pattern = rf'(<string\b[^>]*\bname="{name}"[^>]*>){re.escape(original)}(</string>)'
+        text, count = re.subn(pattern, lambda match: match[1] + original.replace(
+            'Titanium', PRODUCT['product_name'], 1) + match[2], text)
+        if count != 1:
+            raise ValueError('Pinned Titanium launcher string syntax changed: ' + name)
+    ET.fromstring(text)
+    return text
+
+
 def fingerprints(checkout: Path, before: str, after: str) -> dict[str, str]:
     # A clique fingerprint depends on the message and its meaning, not its
     # enclosing resource file. Wrap just the local message nodes so included
@@ -263,6 +285,9 @@ def prepare(checkout: Path, transport: Path) -> dict:
     resource_root = checkout / 'chrome/android/java/res_titanium_base'
     if not resource_root.is_dir():
         raise ValueError('Pinned Titanium launcher resource directory missing')
+    launcher_names = resource_root / 'values/channel_constants.xml'
+    changes[launcher_names] = brand_launcher_names(
+        launcher_names.read_text(encoding='utf-8')).encode('utf-8')
     for path in resource_root.rglob('*.png'):
         with Image.open(path) as old:
             size = old.size

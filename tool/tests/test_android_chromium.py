@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tool.chromium.prepare_android_product import brand, product_path
+from tool.chromium.prepare_android_product import brand, brand_launcher_names, product_path
 from tool.chromium.titanium_product import prepare_source, PRODUCT_PACKAGE, RESEARCH_PACKAGE
 from tool.tests.test_titanium_product import ARGS, BUILD, METADATA
 from tool.chromium.prepare_android_hooks import configuration, HOOK_ACTION
@@ -50,6 +50,22 @@ class AndroidProductOverlayTests(unittest.TestCase):
         self.assertIn('Copyright The Chromium Authors', result)
         self.assertIn('Internet Browser에서는', brand(
             '<translationbundle><translation id="1">Titanium에서는</translation></translationbundle>', xtb=True))
+
+    def test_launcher_strings_preserve_notices_and_reject_upstream_drift(self):
+        original = ('<resources><!-- Copyright The Titanium Authors -->'
+                    '<string name="app_name" translatable="false">Titanium</string>'
+                    '<string name="bookmark_widget_title">Titanium bookmarks</string>'
+                    '<string name="search_widget_title">Titanium search</string>'
+                    '<string name="quick_action_search_widget_title">Titanium quick action search</string>'
+                    '</resources>')
+        result = brand_launcher_names(original)
+        self.assertIn('Copyright The Titanium Authors', result)
+        self.assertIn('translatable="false">Internet Browser</string>', result)
+        self.assertIn('Internet Browser quick action search</string>', result)
+        for changed in (original.replace('>Titanium</string>', '>Changed</string>'),
+                        original.replace('name="app_name"', 'name="other"')):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                brand_launcher_names(changed)
 
     def test_overlay_is_fatal_and_runs_after_upstream_patches_before_gn(self):
         before = (BUILD + '# https://grapheneos.org/build#browser-and-webview\n'
