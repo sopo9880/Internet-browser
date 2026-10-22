@@ -1,9 +1,10 @@
 # Android v0.2.2 installation block investigation
 
-On 2026-10-22 a user reported an installation failure on Samsung One UI 8.5.
+On 2026-10-22 a user reported an installation failure on a Galaxy S23 Ultra
+running Samsung One UI 8.5.
 The device dialog reads `악성 앱 설치 차단됨` and
-`악성 앱으로 의심되어 설치할 수 없습니다.` The device model and the
-security engine's detailed classification are not yet known. This is a failed
+`악성 앱으로 의심되어 설치할 수 없습니다.` The security engine's detailed
+classification is not yet known. This is a failed
 device-installation observation, not successful Android acceptance.
 
 The published APK remains unchanged:
@@ -36,6 +37,21 @@ for the device verdict. Each requires a feature/call-site review before removing
 it; arbitrary permission removal would not establish safety. The APK's manifest
 targets SDK 37, has minimum SDK 29 and `allowBackup=false`; no `debuggable` or
 `testOnly` attribute was present in the inspected manifest.
+
+Initial pinned-source capability tracing found:
+
+- The manifest documents `REQUEST_INSTALL_PACKAGES` for opening downloaded APKs
+  in the Android package installer.
+- The manifest documents `QUERY_ALL_PACKAGES` for determining whether another
+  installed application should handle a web navigation. The WebAPK handler also
+  enumerates installed packages.
+- `AndroidContactsPermissionProviderImpl` checks/requests `READ_CONTACTS` for
+  Chromium's contact picker. The installed web-app permission manager also
+  references it.
+
+These findings establish existing browser uses, not a completed least-privilege
+audit or evidence that a particular permission caused Samsung's classification.
+No declaration was removed to make a scanner stop reporting the APK.
 
 The investigation must still identify the device's actual blocking component and
 classification, review the declared capabilities and native transport, and test a
