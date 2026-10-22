@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import struct
 import subprocess
@@ -56,6 +57,18 @@ def head(path: Path) -> str:
     return git(path, 'rev-parse', 'HEAD').decode().strip()
 
 
+def cached_product_matches(product: dict, *, allow_previous_version: bool = False) -> bool:
+    if product == PRODUCT:
+        return True
+    if not allow_previous_version or not isinstance(product, dict):
+        return False
+    previous, current = product.get('app_version', ''), PRODUCT['app_version']
+    if not re.fullmatch(r'0\.[0-9]+\.[0-9]+', previous):
+        return False
+    return ({**product, 'app_version': current} == PRODUCT and
+            tuple(map(int, previous.split('.'))) <= tuple(map(int, current.split('.'))))
+
+
 def validate_source(workspace: Path, *, require_overlay: bool = True) -> dict:
     titanium = workspace / 'titanium'
     source = titanium / 'chromium/src'
@@ -91,7 +104,8 @@ def validate_source(workspace: Path, *, require_overlay: bool = True) -> dict:
         raise ValueError('Android product overlay has not been prepared')
     owned = set()
     if overlay:
-        if overlay['source_revision'] != head(source) or overlay['product'] != PRODUCT:
+        if (overlay['source_revision'] != head(source) or
+            not cached_product_matches(overlay['product'], allow_previous_version=not require_overlay)):
             raise ValueError('Android overlay revision/product differs')
         for relative, digest in overlay['files'].items():
             if sha256(product_path(source, relative)) != digest:
