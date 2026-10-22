@@ -21,7 +21,7 @@ class YoutubeVideo {
   YoutubeVideo(Profile* profile, content::WeakDocumentPtr document, GURL source);
   ~YoutubeVideo();
   static std::string VideoId(const GURL& source);
-  void Discover(const std::string& visitor, Reply reply);
+  void Discover(const std::string& visitor, const base::DictValue* size_hints, Reply reply);
   void Resolve(GURL video, GURL audio, Reply reply);
   bool done() const { return done_; }
  private:
@@ -36,6 +36,8 @@ class YoutubeVideo {
   GURL source_, audio_;
   std::string video_id_;
   std::vector<GURL> video_parts_;
+  base::DictValue size_hints_;
+  double duration_seconds_ = 0;
   bool transport_ = false, done_ = false;
   Reply reply_;
   std::unique_ptr<network::SimpleURLLoader> loader_;

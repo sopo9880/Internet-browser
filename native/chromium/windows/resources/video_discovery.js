@@ -3,6 +3,12 @@
   const items = new Map();
   const reasons = new Set();
   let youtubeVisitor = '';
+  const youtubeSizeHints = Object.create(null);
+  const fileBytes = value => {
+    if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d{1,16}$/.test(value))) return 0;
+    const bytes = Number(value);
+    return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : 0;
+  };
   const title = (document.querySelector('meta[property="og:title"]')?.content || document.title || '영상').slice(0, 200);
   const protectedMedia = [...document.querySelectorAll('video')].some(v => v.mediaKeys);
   function remote(address) {
@@ -11,7 +17,7 @@
       return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && url.href.length <= 16384 ? url : null;
     } catch { return null; }
   }
-  function add(address, type = '', quality = '', source = 'page', audioAddress = '') {
+  function add(address, type = '', quality = '', source = 'page', audioAddress = '', sizeBytes = 0) {
     if (typeof address !== 'string' || address.length > 16384 || items.size >= 60) return;
     let url;
     try { url = new URL(address, document.baseURI); } catch { return; }
@@ -29,7 +35,8 @@
     const key = url.href + (audio ? '|'+audio.href : '');
     const previous = items.get(key);
     if (previous && (!quality || previous.quality)) return;
-    items.set(key, {url: url.href, audioUrl: audio?.href || '', title, kind, mime, quality: String(quality || '').slice(0, 80), source});
+    items.set(key, {url: url.href, audioUrl: audio?.href || '', title, kind, mime, quality: String(quality || '').slice(0, 80), source,
+      ...(fileBytes(sizeBytes) ? {sizeBytes: fileBytes(sizeBytes), sizeEstimated: false} : {})});
   }
   for (const video of document.querySelectorAll('video')) {
     add(video.currentSrc || video.src, video.getAttribute('type') || (video.videoHeight > 0 ? 'video/unknown' : ''), video.videoHeight ? `${video.videoHeight}p` : '');
@@ -56,17 +63,31 @@
       const formats = Array.isArray(streams.formats) ? streams.formats.slice(0, 100) : [];
       const adaptive = Array.isArray(streams.adaptiveFormats) ? streams.adaptiveFormats.slice(0, 400) : [];
       for (const format of formats) {
-        if (format.url) add(format.url, format.mimeType, format.qualityLabel || format.quality, 'youtube');
+        if (format.url) add(format.url, format.mimeType, format.qualityLabel || format.quality, 'youtube', '', fileBytes(format.contentLength));
         else if (format.signatureCipher || format.cipher) reasons.add('이 YouTube 영상은 서명 처리가 필요한 스트림만 제공합니다. 현재 저장할 수 없습니다.');
       }
       if (streams.hlsManifestUrl) add(streams.hlsManifestUrl, 'application/vnd.apple.mpegurl', '', 'youtube');
       if (streams.dashManifestUrl) add(streams.dashManifestUrl, 'application/dash+xml', '', 'youtube');
+      // Metadata can describe high qualities even when their WEB URLs are absent.
+      // The HLS container differs, so these totals remain explicitly approximate.
+      const hintAudio = adaptive.filter(f => typeof f.mimeType === 'string' && f.mimeType.startsWith('audio/mp4') && fileBytes(f.contentLength))
+        .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0))[0];
+      if (hintAudio) for (const format of adaptive) {
+        const quality = format.qualityLabel;
+        if (typeof quality !== 'string' || !/^\d{2,5}p(?:\d{2,3})?$/.test(quality) ||
+            typeof format.mimeType !== 'string' || !format.mimeType.startsWith('video/mp4') ||
+            !format.mimeType.includes('avc1') || !fileBytes(format.contentLength)) continue;
+        const total = fileBytes(format.contentLength) + fileBytes(hintAudio.contentLength);
+        if (fileBytes(total) && Object.keys(youtubeSizeHints).length < 60) youtubeSizeHints[quality] = total;
+      }
       const audio = adaptive.filter(f => typeof f.mimeType === 'string' && f.mimeType.startsWith('audio/mp4') && typeof f.url === 'string' && remote(f.url))
         .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0))[0];
       let pairs = 0;
       if (audio) for (const format of adaptive) {
         if (typeof format.mimeType !== 'string' || !format.mimeType.startsWith('video/mp4') || typeof format.url !== 'string' || !remote(format.url)) continue;
-        add(format.url, format.mimeType, format.qualityLabel || format.quality, 'youtube', audio.url); ++pairs;
+        const total = fileBytes(format.contentLength) && fileBytes(audio.contentLength)
+          ? fileBytes(format.contentLength) + fileBytes(audio.contentLength) : 0;
+        add(format.url, format.mimeType, format.qualityLabel || format.quality, 'youtube', audio.url, total); ++pairs;
       }
       if (!formats.some(f => f.url) && adaptive.length && !pairs)
         reasons.add('영상·음성의 직접 MP4 주소를 확인하지 못했습니다. 서명 처리나 지원하지 않는 형식이 필요할 수 있습니다.');
@@ -117,7 +138,7 @@
     }
     if (items.size >= 60) items.delete(items.keys().next().value);
     items.set('youtube-native', {url: page.href, title, kind: 'youtube', mime: '',
-      quality: '제공 화질 확인', source: 'youtube', visitorData: youtubeVisitor});
+      quality: '제공 화질 확인', source: 'youtube', visitorData: youtubeVisitor, sizeHints: youtubeSizeHints});
   }
   return {documentUrl: document.URL, items: [...items.values()], reasons: [...reasons]};
 })()

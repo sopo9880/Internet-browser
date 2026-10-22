@@ -109,3 +109,27 @@ test('native YouTube discovery cannot be requested from lookalike hosts or DRM m
   assert.equal(scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts,
     videos:[video('blob:https://www.youtube.com/id',{mediaKeys:{}})]}).items.length,0);
 });
+
+test('native HLS size hints include audio and work without direct WEB URLs', () => {
+  const payload={responseContext:{visitorData:'anonymous'},videoDetails:{videoId:'KMH4gUTuYJs'},streamingData:{adaptiveFormats:[
+    {mimeType:'video/mp4; codecs="avc1.64002a"',qualityLabel:'1080p60',contentLength:'300000000'},
+    {mimeType:'video/mp4; codecs="av01"',qualityLabel:'1080p60',contentLength:'999999999'},
+    {mimeType:'video/mp4; codecs="avc1"',qualityLabel:'720p',contentLength:'-1'},
+    {mimeType:'audio/mp4; codecs="mp4a.40.2"',contentLength:'12000000',bitrate:128000}
+  ]}};
+  const result=scan({baseURI:'https://www.youtube.com/watch?v=KMH4gUTuYJs',scripts:[
+    {type:'',textContent:'var ytInitialPlayerResponse = '+JSON.stringify(payload)+';'}]});
+  assert.equal(result.items[0].sizeHints['1080p60'],312000000);
+  assert.equal(result.items[0].sizeHints['720p'],undefined);
+});
+
+test('direct pair sizes require both known file lengths and reject malformed lengths', () => {
+  function result(audioLength) {
+    return scan({scripts:[{type:'application/json',textContent:JSON.stringify({streamingData:{adaptiveFormats:[
+      {url:'https://cdn.test/v.mp4',mimeType:'video/mp4',qualityLabel:'1080p',contentLength:'1000'},
+      {url:'https://cdn.test/a.m4a',mimeType:'audio/mp4',contentLength:audioLength}
+    ]}})}]}).items[0];
+  }
+  assert.equal(result('200').sizeBytes,1200);assert.equal(result('200').sizeEstimated,false);
+  for(const invalid of [undefined,-1,true,'NaN','9007199254740992']) assert.equal(result(invalid).sizeBytes,undefined);
+});

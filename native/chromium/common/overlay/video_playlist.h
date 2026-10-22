@@ -20,6 +20,7 @@ struct VideoPlaylistPart {
   std::string audio_language;
   std::string codecs;
   std::string frame_rate;
+  std::string bandwidth;
 };
 struct VideoPlaylist {
   std::vector<VideoPlaylistPart> variants;
@@ -105,6 +106,7 @@ inline VideoPlaylist ParseVideoPlaylist(const std::string& text, bool separate_a
       variant.audio_group = attrs["AUDIO"];
       variant.codecs = attrs["CODECS"];
       variant.frame_rate = attrs["FRAME-RATE"];
+      variant.bandwidth = attrs["AVERAGE-BANDWIDTH"].empty() ? attrs["BANDWIDTH"] : attrs["AVERAGE-BANDWIDTH"];
       expect_variant = true;
     } else if (line.starts_with("#EXT-X-MAP:")) {
       const auto attrs = PlaylistAttributes(line.substr(11));

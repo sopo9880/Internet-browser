@@ -6,6 +6,9 @@ int main() {
   assert(vod.error.empty() && vod.parts.size() == 2 && vod.extension == ".ts");
   auto master = ParseVideoPlaylist("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000,CODECS=\"avc1,mp4a\",RESOLUTION=1280x720\n720/main.m3u8\n");
   assert(master.error.empty() && master.variants.size() == 1 && master.variants[0].quality == "1280x720");
+  assert(master.variants[0].bandwidth == "900000");
+  auto average = ParseVideoPlaylist("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000,AVERAGE-BANDWIDTH=500000\nv.m3u8\n");
+  assert(average.error.empty() && average.variants[0].bandwidth == "500000");
   auto mp4 = ParseVideoPlaylist("#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:3,\na.m4s\n#EXT-X-ENDLIST");
   assert(mp4.error.empty() && mp4.extension == ".mp4" && mp4.parts[0].address == "init.mp4");
   assert(!ParseVideoPlaylist("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key\"\na.ts\n#EXT-X-ENDLIST").error.empty());

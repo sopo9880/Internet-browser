@@ -116,7 +116,7 @@ void VideoCapture::Scanned(content::WeakDocumentPtr document, base::Value value)
         const auto token = base::UnguessableToken::Create().ToString();
         row.Set("token", token);
         candidates_.emplace(token, Candidate{document, frame->GetLastCommittedURL().GetWithoutRef(), row.Clone(), std::move(video_parts), std::move(audio_parts), transport});
-        row.Remove("visitorData"); found_.Append(std::move(row));
+        row.Remove("visitorData"); row.Remove("sizeHints"); found_.Append(std::move(row));
       }
     }
     if (const auto* reasons = data->FindList("reasons"))
@@ -221,7 +221,7 @@ void VideoCapture::Inspect(const std::string& token, Reply reply) {
     auto callback = base::BindOnce(&VideoCapture::Inspected, weak_factory_.GetWeakPtr(), token, std::move(reply));
     if (kind == "youtube") {
       const auto* visitor = it->second.data.FindString("visitorData");
-      pointer->Discover(visitor ? *visitor : std::string(), std::move(callback));
+      pointer->Discover(visitor ? *visitor : std::string(), it->second.data.FindDict("sizeHints"), std::move(callback));
     } else {
       const auto* audio = it->second.data.FindString("audioUrl");
       pointer->Resolve(GURL(*it->second.data.FindString("url")), audio ? GURL(*audio) : GURL(), std::move(callback));
@@ -280,9 +280,12 @@ void VideoCapture::Inspected(std::string token, Reply reply, base::DictValue res
       if (!address || !Remote(GURL(*address)) || candidates_.size() >= 300) continue;
       auto row = original.Clone(); row.Set("url", *address); row.Set("quality", *variant.FindString("quality"));
       if (const auto* kind = variant.FindString("kind"); kind && *kind == "youtube_hls") {
-        row.Set("kind", *kind); row.Remove("visitorData");
+        row.Set("kind", *kind); row.Remove("visitorData"); row.Remove("sizeHints");
         if (const auto* audio = variant.FindString("audioUrl")) row.Set("audioUrl", *audio);
         if (const auto* language = variant.FindString("audioLanguage")) row.Set("audioLanguage", *language);
+        if (const auto bytes = variant.FindDouble("sizeBytes")) {
+          row.Set("sizeBytes", *bytes); row.Set("sizeEstimated", true);
+        }
       }
       const auto id = base::UnguessableToken::Create().ToString(); row.Set("token", id);
       candidates_.emplace(id, Candidate{document, source_url, row.Clone(), {}}); rows.Append(std::move(row));

@@ -53,10 +53,15 @@ bool YoutubeVideo::Current() const {
       frame->GetLastCommittedURL().GetWithoutRef() == source_.GetWithoutRef() &&
       content::WebContents::FromRenderFrameHost(frame)->GetBrowserContext() == profile_ && !video_id_.empty();
 }
-void YoutubeVideo::Discover(const std::string& visitor, Reply reply) {
+void YoutubeVideo::Discover(const std::string& visitor, const base::DictValue* size_hints, Reply reply) {
   reply_ = std::move(reply);
   if (!Current() || visitor.empty() || visitor.size() > 4096) {
     Fail("YouTube 페이지를 새로고침한 뒤 영상을 다시 찾아 주세요."); return;
+  }
+  if (size_hints && size_hints->size() <= 60) for (const auto [key, value] : *size_hints) {
+    const auto bytes = value.GetIfDouble();
+    if (key.size() <= 80 && bytes && std::isfinite(*bytes) && *bytes > 0 && *bytes <= 9007199254740991.0)
+      size_hints_.Set(key, *bytes);
   }
   base::DictValue client;
   client.Set("clientName", "VISIONOS"); client.Set("clientVersion", "1.02");
@@ -128,6 +133,8 @@ void YoutubeVideo::Loaded(GURL url, Phase phase, std::optional<std::string> body
     if (!address || !Manifest(GURL(*address))) {
       Fail("이 영상의 저장 가능한 HLS 화질을 확인하지 못했습니다."); return;
     }
+    if (const auto* duration = data->FindStringByDottedPath("videoDetails.lengthSeconds"))
+      base::StringToDouble(*duration, &duration_seconds_);
     Fetch(GURL(*address), Phase::kMaster); return;
   }
   const auto playlist = ParseVideoPlaylist(*body, phase == Phase::kMaster);
@@ -153,6 +160,15 @@ void YoutubeVideo::Loaded(GURL url, Phase phase, std::optional<std::string> body
         quality += base::NumberToString(static_cast<int>(std::round(fps)));
       base::DictValue row; row.Set("url", video.spec()); row.Set("audioUrl", audio.spec());
       row.Set("quality", quality); row.Set("audioLanguage", item.audio_language); row.Set("kind", "youtube_hls");
+      double bytes = size_hints_.FindDouble(quality).value_or(0);
+      if (bytes <= 0) {
+        double bitrate = 0;
+        if (base::StringToDouble(item.bandwidth, &bitrate) && bitrate > 0 && duration_seconds_ > 0)
+          bytes = bitrate * duration_seconds_ / 8;
+      }
+      if (std::isfinite(bytes) && bytes > 0 && bytes <= 9007199254740991.0) {
+        row.Set("sizeBytes", bytes); row.Set("sizeEstimated", true);
+      }
       variants.Append(std::move(row));
     }
     if (variants.empty()) { Fail("이 영상에는 현재 저장할 수 있는 H.264/AAC HLS 화질이 없습니다."); return; }
