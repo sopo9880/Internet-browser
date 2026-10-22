@@ -36,7 +36,7 @@ PRODUCT_OBJECTS = tuple('obj/chrome/browser/internet_browser/' + target + '/' + 
     for target, source in (('transport', 'transport'), ('legacy_data', 'legacy_data'),
                           ('ui', 'internet_browser_ui'), ('video_player', 'video_player'),
                           ('video_player', 'video_subtitles'),
-                          ('updater', 'updater'), ('video_library', 'video_capture'), ('video_library', 'video_stream'), ('video_library', 'video_dash'), ('video_library', 'video_downloads')))
+                          ('updater', 'updater'), ('video_library', 'video_capture'), ('video_library', 'video_stream'), ('video_library', 'video_dash'), ('video_library', 'video_youtube'), ('video_library', 'video_playlist'), ('video_library', 'video_downloads')))
 
 
 def sha256(path: Path) -> str:

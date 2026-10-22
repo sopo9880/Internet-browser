@@ -3,13 +3,16 @@
 #include <cstdint>
 #include <map>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace internet_browser {
 struct VideoPlaylistPart {
-  VideoPlaylistPart(std::string location = {}, std::string label = {})
-      : address(std::move(location)), quality(std::move(label)) {}
+  VideoPlaylistPart(std::string location = {}, std::string label = {});
+  VideoPlaylistPart(const VideoPlaylistPart&);
+  VideoPlaylistPart& operator=(const VideoPlaylistPart&);
+  VideoPlaylistPart(VideoPlaylistPart&&) noexcept;
+  VideoPlaylistPart& operator=(VideoPlaylistPart&&) noexcept;
+  ~VideoPlaylistPart();
   std::string address;
   std::string quality;
   std::string audio_group;
