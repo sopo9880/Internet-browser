@@ -175,7 +175,10 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 cdp.call('Page.enable', session=session)
                 cdp.call('Runtime.enable', session=session)
                 cdp.call('Log.enable', session=session)
-                eventually(lambda: cdp.evaluate(session, 'document.readyState === "complete"'))
+                # A newly attached target can still expose its initial blank
+                # document. Wait for the fixture navigation itself to commit.
+                expected = json.dumps(url)
+                eventually(lambda: cdp.evaluate(session, 'document.readyState === "complete" && location.href.split("#")[0] === '+expected+'.split("#")[0]'))
                 return target, session
             with server(media) as (base, video, webm, dash_video, dash_audio):
                 pages = [open_page(base+route) for route in ['/generic','/youtube','/instagram','/hls']]
@@ -190,6 +193,10 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 tab_rows = api('tabs')['tabs']
                 source_tab = next(row for row in tab_rows if row['url']==base+'/generic')
                 checks['tab_picker_excludes_other_profile'] = not any(row['url']==base+'/private' for row in tab_rows)
+                # The module awaits native initialization before wiring Scan.
+                # Wait for its own tab picker to contain the selected document;
+                # querying the native API above does not initialize the UI.
+                eventually(lambda: cdp.evaluate(hub, '[...document.querySelector("#capture-tab").options].some(option=>option.value==='+json.dumps(source_tab['token'])+')'))
                 cdp.evaluate(hub, 'document.querySelector("#capture-tab").value='+json.dumps(source_tab['token'])+';document.querySelector("#scan-videos").click()')
                 eventually(lambda: cdp.evaluate(hub, 'document.querySelectorAll("#capture-results article").length === 1'))
                 checks['capture_screen_and_quality_options'] = cdp.evaluate(hub, 'document.querySelector("#capture-results h3").textContent.includes("일반 영상")')
