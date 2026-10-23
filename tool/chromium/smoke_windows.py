@@ -208,6 +208,20 @@ def run(executable: Path, report_file: Path, work: Path, media_fixture: Path | N
                         lambda value: bool(value) and '확인 중' not in value)
                     checks['native_product_webui'] = cdp.evaluate(page_session,
                         "document.title === 'Internet Browser 설정' && !!document.querySelector('#dpi-form')")
+                    # Exercise the real compiled WebUI entry routes, not HTML
+                    # loaded through the separate renderer stub harness.
+                    for suffix, panel, label in [
+                        ('#general', 'general', 'fragment'),
+                        ('?source=https%3A%2F%2Fexample.test%2Fwatch#video', 'video', 'query_and_fragment'),
+                        ('index.html#updates', 'updates', 'index_fragment'),
+                    ]:
+                        cdp.call('Page.navigate', {'url':'about:blank'}, session=page_session)
+                        eventually(lambda:cdp.evaluate(page_session,"location.href==='about:blank'"))
+                        cdp.call('Page.navigate', {'url':'chrome://internet-browser/'+suffix}, session=page_session)
+                        checks['native_settings_route_'+label] = eventually(lambda: cdp.evaluate(page_session,
+                            "document.title==='Internet Browser 설정'&&!!document.querySelector('#dpi-form')&&document.querySelector('#panel-"+panel+"')?.hidden===false&&document.querySelectorAll('#panel-general article').length>=2"))
+                    cdp.call('Page.navigate', {'url':'chrome://internet-browser/'}, session=page_session)
+                    eventually(lambda:cdp.evaluate(page_session,"!!document.querySelector('#dpi-form')"))
                     eventually(lambda: cdp.evaluate(page_session, "document.querySelector('#videos button')?.textContent === 'Saved fixture'"))
                     cdp.evaluate(page_session, "document.querySelector('#tab-library').click();document.querySelector('.rename-video').click()")
                     cdp.evaluate(page_session, "document.querySelector('dialog input').value='Renamed fixture';document.querySelector('dialog button[value=accept]').click()")
