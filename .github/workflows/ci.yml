@@ -67,6 +67,8 @@ jobs:
           "$RUNNER_TEMP/update-validation-check"
       - name: Verify legacy saved-video filename compatibility
         run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/video_payload_check.cc -o "$RUNNER_TEMP/video-payload-check"
+          "$RUNNER_TEMP/video-payload-check"
           c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. tool/tests/video_file_types_check.cc -o "$RUNNER_TEMP/video-file-types-check"
           "$RUNNER_TEMP/video-file-types-check"
           c++ -std=c++20 -O2 -Wall -Wextra -Werror -I. -Inative/chromium/common/overlay tool/tests/private_video_access_check.cc -o "$RUNNER_TEMP/private-video-access-check"

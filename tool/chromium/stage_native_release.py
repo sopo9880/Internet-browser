@@ -52,6 +52,8 @@ VIDEO_CAPTURE_CHECKS = {'capture_screen_and_quality_options', 'native_capture_do
     'transmux_processor_released', 'active_transmux_browser_shutdown',
     'active_transmux_partial_cleanup'}
 VIDEO_CAPTURE_CHECKS |= {
+    'html_response_rejected_bad-video.mp4', 'html_response_rejected_fake-video.mp4',
+    'direct_webm_saved_video_playable', 'direct_webm_delete_removes_file_and_marker',
     'tab_picker_excludes_other_profile', 'native_scan_only_selected_tab', 'forged_tab_token_rejected',
     'navigated_tab_token_rejected', 'saved_pair_reports_combined_size', 'non_library_file_delete_rejected',
     'record_only_delete_preserves_media_bytes', 'pair_delete_removes_video_audio_and_completion_marker',
@@ -62,6 +64,8 @@ VIDEO_CAPTURE_CHECKS |= {
     'generic_hls_mixed_pair_quality_and_audio', 'generic_hls_mixed_pair_audio_exact_bytes',
     'generic_hls_mixed_pair_video_converted'}
 UPDATE_UI_CHECKS = {
+    'video_downloadhelper_below_adblock',
+    'displayed_product_version_matches_manifest',
     'settings_tabs_switch_panels', 'selected_tab_only_requested',
     'download_progress_shows_percent_and_byte_counts',
     'android_verified_download_opens_security_screen',

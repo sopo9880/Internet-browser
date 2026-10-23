@@ -82,6 +82,7 @@ def product_path(checkout: Path, relative: str) -> Path:
         'chrome/android/java/src/org/chromium/chrome/browser/InternetBrowserLegacySnapshot.java',
         'chrome/android/java/src/org/chromium/chrome/browser/InternetBrowserSettingsActivity.java',
         'chrome/android/java/src/org/chromium/chrome/browser/app/ChromeActivity.java',
+        'chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java',
         'chrome/android/java/src/org/chromium/chrome/browser/contextmenu/ChromeContextMenuPopulator.java',
         'chrome/android/java/src/org/chromium/chrome/browser/LegacyStringListDecoder.java',
         'chrome/android/java/src/org/chromium/chrome/browser/homepage/HomepageManager.java',
@@ -293,13 +294,40 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
     def settings_menu(text):
         start = text.index('        if (id == R.id.preferences_id) {\n')
         end = text.index('\n        if (id == R.id.update_menu_id)', start)
-        return text[:start] + '''        if (id == R.id.preferences_id) {
+        return text[:start] + '''        if (id == R.id.contextmenu_save_video) {
+            android.content.Intent settings = new android.content.Intent(this,
+                    org.chromium.chrome.browser.InternetBrowserSettingsActivity.class);
+            settings.putExtra("section", "video");
+            if (getActivityTab() != null && !getActivityTab().isIncognito())
+                settings.putExtra("source", getActivityTab().getUrl().getSpec());
+            startActivity(settings);
+            return true;
+        }
+        if (id == R.id.preferences_id) {
             startActivity(new android.content.Intent(this,
                     org.chromium.chrome.browser.InternetBrowserSettingsActivity.class));
             return true;
         }
 ''' + text[end:]
     update('chrome/android/java/src/org/chromium/chrome/browser/app/ChromeActivity.java', settings_menu)
+    def video_app_menu(text):
+        # Use an existing compiled resource ID for the distinct video action;
+        # leave Chromium's Save page action intact.
+        anchor = '        modelList.add(buildSettingsItem());'
+        if text.count(anchor) != 4:
+            raise ValueError('Pinned tabbed settings menu anchors changed')
+        text = text.replace(anchor, '''        if (!isIncognitoShowing()) modelList.add(buildInternetBrowserVideoItem());
+''' + anchor)
+        return replace_once(text, '    private ListItem buildSettingsItem() {', '''    private ListItem buildInternetBrowserVideoItem() {
+        PropertyModel model = AppMenuItemUtils.buildModelForStandardMenuItem(
+                mContext, getAppMenuItemTheme(), R.id.contextmenu_save_video,
+                R.string.contextmenu_save_video, Resources.ID_NULL, isMenuIconAtStart());
+        model.set(AppMenuItemProperties.TITLE, "영상 다운로드");
+        return new ListItem(AppMenuHandler.AppMenuItemType.STANDARD, model);
+    }
+
+    private ListItem buildSettingsItem() {''')
+    update('chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java', video_app_menu)
     def video_context_menu(text):
         text = replace_once(text,
             '            if (mParams.canSaveMedia()\n'
@@ -307,6 +335,19 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
             '                    && mMode != ContextMenuMode.THIN_WEB_VIEW) {',
             '            if (!mParams.isEncrypted()\n'
             '                    && mMode != ContextMenuMode.THIN_WEB_VIEW) {')
+        text = replace_once(text, '        return groupedItems;\n', '''        // A player overlay can be hit instead of the <video>. Offer an
+        // explicit page-video action without treating Save link as media.
+        if (!mParams.isVideo() && !mItemDelegate.isIncognito()
+                && mMode == ContextMenuMode.NORMAL
+                && areMandatoryFlowsCompleted(getProfile())
+                && mItemDelegate.getWebContents().getLastCommittedUrl().getScheme().matches("https?")) {
+            ModelList mediaGroup = new ModelList();
+            mediaGroup.add(createListItem(Item.SAVE_VIDEO, "이 페이지의 영상 다운로드",
+                    !mIsDownloadRestrictedByPolicy));
+            groupedItems.add(mediaGroup);
+        }
+        return groupedItems;
+''')
         start = text.index('        } else if (itemId == R.id.contextmenu_save_video) {')
         end = text.index('        } else if (itemId == R.id.contextmenu_save_link_as)', start)
         return text[:start] + '''        } else if (itemId == R.id.contextmenu_save_video) {
@@ -345,6 +386,7 @@ def prepare(checkout: Path, transport: Path) -> dict:
         'android:extractNativeLibs="false"', 'android:extractNativeLibs="true"', 1).replace(
         '</application>',
         '<activity android:name="org.chromium.chrome.browser.InternetBrowserSettingsActivity" '
+        'android:theme="@style/Theme.Chromium.Settings" '
         'android:exported="false" android:configChanges="keyboardHidden|orientation|screenSize" />\n'
         '</application>', 1).encode()
     safety = checkout / 'chrome/browser/extensions/extension_safety_check_utils.cc'

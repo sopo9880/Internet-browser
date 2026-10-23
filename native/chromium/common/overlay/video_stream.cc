@@ -17,6 +17,7 @@
 #include "chrome/browser/internet_browser/video_dash.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
 #include "chrome/browser/internet_browser/video_request.h"
+#include "chrome/browser/internet_browser/video_payload.h"
 #include "chrome/browser/internet_browser/resources.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
@@ -120,12 +121,24 @@ bool SaveTransmuxed(base::FilePath original, base::FilePath output, bool first, 
   }
   return base::DeleteFile(original) && AppendPart(converted, output, first);
 }
-bool Finalize(base::FilePath directory, std::string title, std::string page, bool audio) {
-  const auto file = directory.AppendASCII("video.mp4");
+bool Finalize(base::FilePath directory, std::string title, std::string page, bool audio, bool direct_file) {
   const auto partial = directory.AppendASCII("video.part");
+  std::string filename = "video.mp4";
+  if (direct_file) {
+    base::File input(partial, base::File::FLAG_OPEN | base::File::FLAG_READ);
+    std::array<char, 4096> header{};
+    if (!input.IsValid()) return false;
+    const auto read = input.Read(0, base::as_writable_byte_span(header));
+    if (!read) return false;
+    const auto extension = VideoPayloadExtension(std::string_view(header.data(), *read));
+    if (extension.empty() || (extension == ".mp4" && !ClearMp4(input, input.GetLength()))) return false;
+    filename = "video" + std::string(extension);
+  }
+  const auto file = directory.AppendASCII(filename);
   if (!base::Move(partial, file)) return false;
   if (audio && !base::Move(directory.AppendASCII("audio.part"), directory.AppendASCII("audio.mp4"))) return false;
   base::DictValue entry; entry.Set("title", title); entry.Set("sourcePage", page);
+  entry.Set("mediaFile", filename);
   entry.Set("separateAudio", audio);
   std::string json;
   if (!base::JSONWriter::Write(entry, &json)) return false;
@@ -197,7 +210,8 @@ void VideoStream::Inspect(GURL manifest, Reply reply, bool dash, GURL audio_mani
       base::BindOnce(&Directory, directory_), base::BindOnce(&VideoStream::DirectoryReady,
       weak_factory_.GetWeakPtr(), true, std::move(manifest), std::move(reply)));
 }
-void VideoStream::Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts, bool transport_stream, bool audio_transport_stream) {
+void VideoStream::Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts, bool transport_stream, bool audio_transport_stream, bool direct_file) {
+  direct_file_ = direct_file;
   transport_stream_ = transport_stream; audio_transport_stream_ = audio_transport_stream;
   parts_ = std::move(parts);
   audio_start_ = parts_.size();
@@ -241,11 +255,14 @@ void VideoStream::Started(download::DownloadItem* item, download::DownloadInterr
   OnDownloadUpdated(item);
 }
 void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
+  if (!inspect_ && IsVideoErrorMime(item->GetMimeType())) {
+    Fail("영상 대신 웹페이지 또는 오류 응답이 반환됐습니다. 원본 탭에서 영상을 재생한 뒤 다시 찾아 주세요."); return;
+  }
   if (item->IsDangerous() || item->IsInsecure()) {
     Fail("브라우저의 안전 검사로 영상 저장을 중단했습니다."); return;
   }
-  if (item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : TransportPart() ? 8LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
-      received_ + item->GetReceivedBytes() > 8.0 * 1024 * 1024 * 1024) {
+  if (!direct_file_ && (item->GetReceivedBytes() > (inspect_ ? 2LL * 1024 * 1024 : TransportPart() ? 8LL * 1024 * 1024 : 8LL * 1024 * 1024 * 1024) ||
+      received_ + item->GetReceivedBytes() > 8.0 * 1024 * 1024 * 1024)) {
     Fail(inspect_ ? "재생 목록이 2 MB 제한을 초과했습니다." : TransportPart() ? "MPEG-TS 구간이 현재 변환 제한인 8 MB를 초과했습니다." : "영상·음성의 합계가 현재 저장 제한인 8 GB를 초과했습니다."); return;
   }
   if (item->GetState() == download::DownloadItem::COMPLETE) {
@@ -281,6 +298,12 @@ void VideoStream::PartReady(base::FilePath path, GURL final_url) {
     worker_->PostTaskAndReplyWithResult(FROM_HERE,
         base::BindOnce([](base::FilePath path) { std::string text; base::ReadFileToStringWithMaxSize(path, &text, 2 * 1024 * 1024); return text; }, path),
         base::BindOnce(&VideoStream::Inspected, weak_factory_.GetWeakPtr(), final_url));
+  } else if (direct_file_) {
+    worker_->PostTaskAndReplyWithResult(FROM_HERE,
+        base::BindOnce([](base::FilePath input, base::FilePath output) {
+          return !base::IsLink(input) && !base::PathExists(output) && base::Move(input, output);
+        }, path, directory_.AppendASCII("video.part")),
+        base::BindOnce(&VideoStream::Appended, weak_factory_.GetWeakPtr()));
   } else if (TransportPart()) {
     worker_->PostTaskAndReplyWithResult(FROM_HERE,
         base::BindOnce(&ReadTransportPart, path),
@@ -431,12 +454,12 @@ void VideoStream::Appended(bool success) {
   waiting_ = false;
   if (state_ != 0) { Cleanup(); return; }
   if (!success) { Fail("MP4 구간을 저장하지 못했습니다. 보호되거나 지원하지 않는 영상일 수 있습니다."); return; }
-  if (received_ > 8.0 * 1024 * 1024 * 1024) { Fail("영상이 현재 저장 크기 제한인 8 GB를 초과했습니다."); return; }
+  if (!direct_file_ && received_ > 8.0 * 1024 * 1024 * 1024) { Fail("영상이 현재 저장 크기 제한인 8 GB를 초과했습니다."); return; }
   ++completed_;
   if (completed_ == parts_.size()) {
     waiting_ = true;
     worker_->PostTaskAndReplyWithResult(FROM_HERE,
-        base::BindOnce(&Finalize, directory_, title_, page_, audio_start_ < parts_.size()), base::BindOnce(&VideoStream::Finalized, weak_factory_.GetWeakPtr()));
+        base::BindOnce(&Finalize, directory_, title_, page_, audio_start_ < parts_.size(), direct_file_), base::BindOnce(&VideoStream::Finalized, weak_factory_.GetWeakPtr()));
   } else if (!paused_) NextPart();
 }
 void VideoStream::NextPart() {
@@ -450,7 +473,7 @@ void VideoStream::NextPart() {
 void VideoStream::Finalized(bool success) {
   waiting_ = false;
   if (state_ != 0) { Cleanup(); return; }
-  if (!success) { Fail("완성된 영상을 서재에 등록하지 못했습니다."); return; }
+  if (!success) { Fail("유효한 영상 파일이 아닙니다. 웹페이지·보호된 영상 또는 지원하지 않는 형식은 저장하지 않습니다."); return; }
   state_ = 1; paused_ = false;
   ReleaseProcessor();
 }
@@ -459,11 +482,11 @@ base::DictValue VideoStream::Status() const {
   result.Set("inspection", inspect_);
   result.Set("isolatedProcessor", processor_isolated_);
   result.Set("state", state_); result.Set("paused", paused_); result.Set("blocked", false);
-  result.Set("canResume", state_ == 0 && paused_); result.Set("stream", true);
-  result.Set("pausing", paused_ && (observation_.IsObserving() || waiting_));
+  result.Set("canResume", state_ == 0 && paused_); result.Set("stream", !direct_file_);
+  result.Set("pausing", !direct_file_ && paused_ && (observation_.IsObserving() || waiting_));
   result.Set("completedParts", static_cast<int>(completed_)); result.Set("totalParts", static_cast<int>(parts_.size()));
   result.Set("received", received_ + (observation_.IsObserving() ? observation_.GetSource()->GetReceivedBytes() : 0));
-  result.Set("total", 0); result.Set("error", error_); return result;
+  result.Set("total", direct_file_ && observation_.IsObserving() ? static_cast<double>(observation_.GetSource()->GetTotalBytes()) : 0); result.Set("error", error_); return result;
 }
 bool VideoStream::Control(const std::string& action) {
   if (state_ != 0 || inspect_) return false;
@@ -471,9 +494,16 @@ bool VideoStream::Control(const std::string& action) {
   // Pause between complete parts. Rapidly pausing an initializing download
   // stream can invalidate Chromium's data pipe before its first read; keeping
   // part downloads atomic also makes retries deterministic.
-  if (action == "pause") { paused_ = true; return true; }
+  if (action == "pause") {
+    paused_ = true;
+    if (direct_file_ && observation_.IsObserving()) observation_.GetSource()->Pause();
+    return true;
+  }
   if (action == "resume") {
     paused_ = false; error_.clear();
+    if (direct_file_ && observation_.IsObserving() && observation_.GetSource()->CanResume()) {
+      observation_.GetSource()->Resume(true); return true;
+    }
     if (observation_.IsObserving() && observation_.GetSource()->GetState() == download::DownloadItem::INTERRUPTED) {
       auto* item = observation_.GetSource(); observation_.Reset(); ForgetDownload(profile_, item, true);
     }

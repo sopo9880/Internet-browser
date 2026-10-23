@@ -24,7 +24,7 @@ class VideoStream : public download::DownloadItem::Observer, public content::Web
   VideoStream(Profile* profile, content::WeakDocumentPtr document, std::string title, std::string page, std::string referrer_policy = {});
   ~VideoStream() override;
   void Inspect(GURL manifest, Reply reply, bool dash = false, GURL audio_manifest = GURL());
-  void Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts = {}, bool transport_stream = false, bool audio_transport_stream = false);
+  void Start(std::vector<GURL> parts, Reply reply, std::vector<GURL> audio_parts = {}, bool transport_stream = false, bool audio_transport_stream = false, bool direct_file = false);
   base::DictValue Status() const;
   bool Control(const std::string& action);
   void Shutdown();
@@ -67,6 +67,7 @@ class VideoStream : public download::DownloadItem::Observer, public content::Web
   bool inspect_ = false, dash_ = false, transport_stream_ = false, paused_ = false, waiting_ = false;
   bool processor_isolated_ = false;
   bool shutting_down_ = false;
+  bool direct_file_ = false;
   Reply reply_;
   std::unique_ptr<content::WebContents> processor_;
   base::FilePath pending_transmux_path_;
