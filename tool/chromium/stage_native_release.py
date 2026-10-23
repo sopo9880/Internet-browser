@@ -26,6 +26,8 @@ ARTIFACTS = {'windows': 'native-windows-v022-development-not-release',
              'android': 'native-android-production-signed'}
 WORKFLOW = '.github/workflows/native-android-production.yml'
 SMOKE_CHECKS = {'native_browser_started', 'native_product_webui', 'native_upstream_notices',
+                'native_settings_route_fragment', 'native_settings_route_query_and_fragment',
+                'native_settings_route_index_fragment',
                 'native_legacy_bookmark_import', 'native_legacy_bookmark_dedup',
                 'native_video_title_saved', 'native_player_resume_from_legacy',
                 'native_player_position_saved', 'native_player_reopen_resume',

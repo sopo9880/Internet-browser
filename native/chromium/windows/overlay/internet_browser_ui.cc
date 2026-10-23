@@ -385,8 +385,11 @@ InternetBrowserUI::InternetBrowserUI(content::WebUI* web_ui)
   auto* source = content::WebUIDataSource::CreateAndAdd(profile, "internet-browser");
   source->SetRequestFilter(
       base::BindRepeating([](const std::string&) { return true; }),
-      base::BindRepeating([](const std::string& path,
+      base::BindRepeating([](const std::string& request_path,
                             content::WebUIDataSource::GotDataCallback callback) {
+        // URLDataSource passes the query/fragment with this request path.
+        // Settings activities use both to select a category and source tab.
+        const auto path = request_path.substr(0, request_path.find_first_of("?#"));
         std::string data;
         if (path.empty() || path == "index.html")
           data = internet_browser::kIndexHtml;
