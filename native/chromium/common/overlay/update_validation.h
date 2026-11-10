@@ -31,6 +31,15 @@ inline std::optional<std::array<uint32_t, 4>> UpdateVersion(std::string_view tex
   if (!has_digit || component < 2) return std::nullopt;
   return result;
 }
+// Release notes are shown in WebUI; a plain byte cut can split a multi-byte
+// (e.g. Korean) UTF-8 character and hand invalid UTF-8 to base::Value.
+inline std::string_view TruncateUtf8(std::string_view text, size_t max_bytes) {
+  if (text.size() <= max_bytes) return text;
+  size_t end = max_bytes;
+  // Back off continuation bytes (10xxxxxx) to the start of the cut character.
+  while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) --end;
+  return text.substr(0, end);
+}
 inline bool ValidUpdateAsset(std::string_view tag, std::string_view name,
                              std::string_view address, int64_t size,
                              std::string_view digest, bool android) {

@@ -67,14 +67,24 @@
         return false;
     }
 
+    // Launching org.chromium.chrome.browser.settings.SettingsActivity by class
+    // name from the application context skipped Chromium's own settings
+    // navigation (activity context, single-activity/in-tab flags) and could
+    // close the app. Ask the product settings activity, which is on top and
+    // can depend on chrome_java, to open settings through SettingsNavigation.
     @CalledByNative
     private static boolean openInternetBrowserBrowserSettings() {
         Context context = ContextUtils.getApplicationContext();
+        android.app.Activity activity = org.chromium.base.ApplicationStatus.getLastTrackedFocusedActivity();
+        Intent intent = new Intent("org.chromium.chrome.browser.internet_browser.OPEN_BROWSER_SETTINGS");
+        intent.setClassName(context, "org.chromium.chrome.browser.InternetBrowserSettingsActivity");
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         try {
-            Intent intent = new Intent();
-            intent.setClassName(context, "org.chromium.chrome.browser.settings.SettingsActivity");
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
+            if (activity != null) {
+                activity.startActivity(intent);
+            } else {
+                context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            }
             return true;
         } catch (SecurityException | ActivityNotFoundException error) {
             return false;
