@@ -23,5 +23,14 @@ int main() {
   assert(!ValidUpdateAsset(tag, name, url, 123, "", false));
   const std::string apk = "Internet-browser-Android-v0.3.0.apk";
   assert(ValidUpdateAsset(tag, apk, "https://github.com/sopo9880/Internet-browser/releases/download/" + tag + "/" + apk, 123, hash, true));
+  // "가" is 3 UTF-8 bytes; a cut inside it must drop the whole character.
+  const std::string korean = "ab\xea\xb0\x80" "cd";
+  assert(TruncateUtf8(korean, 100) == korean);
+  assert(TruncateUtf8(korean, 5) == "ab\xea\xb0\x80");
+  assert(TruncateUtf8(korean, 4) == "ab");
+  assert(TruncateUtf8(korean, 3) == "ab");
+  assert(TruncateUtf8(korean, 2) == "ab");
+  assert(TruncateUtf8(korean, 0).empty());
+  assert(TruncateUtf8(std::string(70000, 'x'), 65536).size() == 65536);
   std::cout << "Native update version and trusted-asset checks passed.\n";
 }
