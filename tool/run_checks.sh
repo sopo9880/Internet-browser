@@ -42,6 +42,7 @@ for entry in \
     video_payload: \
     video_file_types: \
     private_video_access: \
+    video_mux: \
     video_playlist:native/chromium/common/overlay/video_playlist.cc; do
   name="${entry%%:*}"
   extra="${entry#*:}"
@@ -50,6 +51,10 @@ for entry in \
   "$cxx" "${cxxflags[@]}" "tool/tests/${name}_check.cc" $extra -o "$out/${name}"
   "$out/${name}"
 done
+
+step 'Native video/audio MP4 mux with real H.264/AAC media (ffmpeg)'
+# Skips itself when ffmpeg/ffprobe/node are unavailable.
+python3 tool/tests/video_mux_media_test.py "$out/video_mux"
 
 step 'Native video discovery, transmuxer and transfer history (Node)'
 node --test tool/tests/video_discovery_test.cjs \

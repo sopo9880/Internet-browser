@@ -48,6 +48,8 @@ jobs:
       - name: Restore project widget test after Flutter bootstrap
         run: git show HEAD:test/widget_test.dart > test/widget_test.dart
       - run: python3 tool/prepare_platforms.py
+      - name: Install ffmpeg for real-media MP4 mux checks
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Run all non-Flutter checks (Python, Java, C++ overlay, Node)
         # Same entry point developers run locally; see tool/run_checks.sh.
         run: tool/run_checks.sh
