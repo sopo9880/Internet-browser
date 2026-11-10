@@ -3,7 +3,7 @@
 Windows·Android용 개인 브라우저입니다. 소스에서 빌드한 Chromium 위에
 DPI 우회(ByeDPI), 영상 찾기·저장·오프라인 재생, 자체 업데이트를 얹습니다.
 
-- 현재 제품 버전: **v0.2.5** (`pubspec.yaml`, `native/chromium/product.json`)
+- 현재 제품 버전: **v0.2.6** (`pubspec.yaml`, `native/chromium/product.json`)
 - 엔진: Chromium **155.0.8059.84** (리비전과 depot_tools SHA 고정)
   - Windows: Chromium 본체(`chrome`, `mini_installer`)를 직접 빌드합니다.
   - Android: Titanium/Vanadium 기반 Chromium 포크를 빌드합니다.

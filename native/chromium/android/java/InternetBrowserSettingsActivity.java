@@ -11,6 +11,7 @@ import org.chromium.base.version_info.VersionInfo;
 import org.chromium.chrome.browser.content.WebContentsFactory;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.profiles.ProfileManager;
+import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.components.embedder_support.delegate.WebContentsDelegateAndroid;
 import org.chromium.components.embedder_support.view.ContentView;
 import org.chromium.components.thinwebview.ThinWebView;
@@ -24,10 +25,14 @@ import org.chromium.content_public.common.ResourceRequestBody;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.IntentRequestTracker;
 import org.chromium.ui.base.ViewAndroidDelegate;
+import org.chromium.ui.widget.Toast;
 import org.chromium.url.GURL;
 
 /** Product settings surface. Its WebContents never enters a browser TabModel. */
 public class InternetBrowserSettingsActivity extends ChromeBaseAppCompatActivity {
+    /** Sent by PlatformUtil when the hub's "상세 설정" button is pressed. */
+    static final String ACTION_OPEN_BROWSER_SETTINGS =
+            "org.chromium.chrome.browser.internet_browser.OPEN_BROWSER_SETTINGS";
     private WebContents mContents;
     private ThinWebView mView;
     private ActivityWindowAndroid mWindow;
@@ -53,6 +58,12 @@ public class InternetBrowserSettingsActivity extends ChromeBaseAppCompatActivity
     protected void onCreate(Bundle state) {
         ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
         super.onCreate(state);
+        if (ACTION_OPEN_BROWSER_SETTINGS.equals(getIntent().getAction())) {
+            // No hub instance was on top: open Chromium settings and leave.
+            openBrowserSettings();
+            finish();
+            return;
+        }
         mWindow = new ActivityWindowAndroid(this, true,
                 IntentRequestTracker.createFromActivity(this), null, false);
         mContents = WebContentsFactory.createWebContents(
@@ -85,6 +96,20 @@ public class InternetBrowserSettingsActivity extends ChromeBaseAppCompatActivity
         }
         address.fragment(section);
         mContents.getNavigationController().loadUrl(new LoadUrlParams(address.build().toString()));
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (ACTION_OPEN_BROWSER_SETTINGS.equals(intent.getAction())) openBrowserSettings();
+    }
+
+    private void openBrowserSettings() {
+        try {
+            SettingsNavigationFactory.createSettingsNavigation(this).startSettings(this);
+        } catch (RuntimeException error) {
+            Toast.makeText(this, "상세 설정을 열지 못했습니다.", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override

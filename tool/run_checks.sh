@@ -59,6 +59,7 @@ python3 tool/tests/video_mux_media_test.py "$out/video_mux"
 step 'Native video discovery, transmuxer and transfer history (Node)'
 node --test tool/tests/video_discovery_test.cjs \
   tool/tests/video_transmuxer_tracks_test.cjs \
-  tool/tests/video_transfer_history_test.cjs
+  tool/tests/video_transfer_history_test.cjs \
+  tool/tests/youtube_background_test.cjs
 
 printf '\nAll non-Flutter checks passed.\n'

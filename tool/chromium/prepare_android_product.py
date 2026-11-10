@@ -21,6 +21,46 @@ except ImportError:
     from prepare_windows import ROOT, PRODUCT, translation_id_map, remap_translation_ids, replace_once, resource_header, native_source_bytes
 
 
+YOUTUBE_BACKGROUND_HOSTS = ('www.youtube.com', 'm.youtube.com', 'youtube.com', 'music.youtube.com')
+
+
+def background_media_main_source(text: str) -> str:
+    """Disable Chromium's Android background-media suspend before any renderer
+    starts (the switch is propagated to renderers), so a playing video with
+    sound keeps playing when the app is backgrounded or the screen is off."""
+    text = replace_once(text, '#include "base/android/jni_android.h"\n',
+        '#include "base/android/jni_android.h"\n#include "base/command_line.h"\n')
+    text = replace_once(text, '#include "content/public/common/main_function_params.h"\n',
+        '#include "content/public/common/main_function_params.h"\n#include "media/base/media_switches.h"\n')
+    return replace_once(text, '  content::Compositor::Initialize();',
+        '  base::CommandLine::ForCurrentProcess()->AppendSwitch(\n'
+        '      switches::kDisableBackgroundMediaSuspend);\n'
+        '  content::Compositor::Initialize();')
+
+
+def youtube_background_renderer_source(text: str) -> str:
+    """Run native/chromium/android/resources/youtube_background.js in the main
+    world of top-level YouTube documents before page scripts."""
+    script = (ROOT / 'native/chromium/android/resources/youtube_background.js').read_text(encoding='utf-8')
+    if ')JS"' in script or not script.isascii():
+        raise ValueError('YouTube background script cannot be embedded as an ASCII raw string')
+    hosts = ' ||\n         '.join(f'url.host() == "{host}"' for host in YOUTUBE_BACKGROUND_HOSTS)
+    injection = (
+        '  // Internet Browser: YouTube pauses itself when the page reports hidden.\n'
+        '  if (render_frame->IsMainFrame()) {\n'
+        '    const GURL url = render_frame->GetWebFrame()->GetDocument().Url();\n'
+        '    if (url.SchemeIs("https") &&\n'
+        f'        ({hosts})) {{\n'
+        f'      render_frame->ExecuteJavaScript(uR"JS({script})JS");\n'
+        '    }\n'
+        '  }\n')
+    return replace_once(text,
+        'void ChromeContentRendererClient::RunScriptsAtDocumentStart(\n'
+        '    content::RenderFrame* render_frame) {\n',
+        'void ChromeContentRendererClient::RunScriptsAtDocumentStart(\n'
+        '    content::RenderFrame* render_frame) {\n' + injection)
+
+
 def brand(text: str, *, xtb: bool = False) -> str:
     tag = 'translation' if xtb else 'message'
     def replace(match):
@@ -213,8 +253,9 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
         text = replace_once(text, 'ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() = default;',
             'ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() {\n'
             '  internet_browser::StopTransport();\n}')
-        return replace_once(text, '  content::Compositor::Initialize();',
+        text = replace_once(text, '  content::Compositor::Initialize();',
             '  internet_browser::StartTransport();\n  content::Compositor::Initialize();')
+        return background_media_main_source(text)
     def updater_java(text):
         if not text.rstrip().endswith('}'):
             raise ValueError('Pinned PlatformUtil class boundary changed')
@@ -222,6 +263,7 @@ def native_source_changes(checkout: Path) -> dict[Path, bytes]:
                             for name in ('updater_methods.java.inc', 'navigation_methods.java.inc'))
         return text.rstrip()[:-1] + '\n' + methods + '\n}\n'
     update('chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java', updater_java)
+    update('chrome/renderer/chrome_content_renderer_client.cc', youtube_background_renderer_source)
     update('chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java',
            external_navigation_source)
     update('chrome/browser/net/chrome_network_delegate.cc', private_media_network_source)
