@@ -55,5 +55,20 @@ class BackgroundPlaybackPatchTest(unittest.TestCase):
             product.background_media_main_source(MAIN.replace('Compositor::Initialize', 'Compositor::Start'))
 
 
+
+class OverlayAllowlistTest(unittest.TestCase):
+    def test_every_patched_upstream_file_is_an_allowed_overlay_path(self):
+        # A patched file missing from product_path's allowlist only fails on
+        # the self-hosted Chromium runner; catch it in the fast checks.
+        import re
+        import tempfile
+        source = (product.ROOT / 'tool/chromium/prepare_android_product.py').read_text()
+        patched = set(re.findall(r"update\('([^']+)'", source))
+        self.assertIn('chrome/renderer/chrome_content_renderer_client.cc', patched)
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory).resolve()
+            for relative in sorted(patched):
+                with self.subTest(relative=relative):
+                    product.product_path(checkout, relative)
 if __name__ == '__main__':
     unittest.main()

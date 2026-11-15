@@ -114,6 +114,7 @@ def product_path(checkout: Path, relative: str) -> Path:
         'chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/PlatformUtil.java',
         'chrome/browser/extensions/extension_safety_check_utils.cc',
         'chrome/browser/chrome_browser_main_android.cc', 'chrome/browser/BUILD.gn',
+        'chrome/renderer/chrome_content_renderer_client.cc',
         'chrome/browser/net/chrome_network_delegate.cc', 'chrome/browser/net/BUILD.gn',
         'chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java',
         'chrome/browser/ui/webui/chrome_web_ui_configs.cc', 'chrome/browser/ui/webui/BUILD.gn',
