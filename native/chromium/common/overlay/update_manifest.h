@@ -27,7 +27,7 @@ inline base::DictValue ParseUpdateManifest(const base::DictValue& release,
   result.Set("version", version);
   result.Set("releasePage", "https://github.com/sopo9880/Internet-browser/releases/tag/" + *tag);
   if (const auto* description = release.FindString("body"))
-    result.Set("description", description->substr(0, 65536));
+    result.Set("description", std::string(TruncateUtf8(*description, 65536)));
   if (const auto* assets = release.FindList("assets")) {
     for (const auto& value : *assets) {
       const auto* asset = value.GetIfDict();

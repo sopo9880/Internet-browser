@@ -1,11 +1,16 @@
 #include "chrome/browser/internet_browser/video_stream.h"
 #include <array>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <vector>
 #include <string_view>
 #include <utility>
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/base64.h"
 #include "base/functional/bind.h"
+#include "base/memory/raw_ref.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/task/thread_pool.h"
@@ -16,6 +21,7 @@
 #include "chrome/browser/internet_browser/video_playlist.h"
 #include "chrome/browser/internet_browser/video_dash.h"
 #include "chrome/browser/internet_browser/video_metadata.h"
+#include "chrome/browser/internet_browser/video_mux.h"
 #include "chrome/browser/internet_browser/video_request.h"
 #include "chrome/browser/internet_browser/video_payload.h"
 #include "chrome/browser/internet_browser/resources.h"
@@ -121,8 +127,59 @@ bool SaveTransmuxed(base::FilePath original, base::FilePath output, bool first, 
   }
   return base::DeleteFile(original) && AppendPart(converted, output, first);
 }
+// base::File adapters for the dependency-free muxer.
+class FileMp4Source : public Mp4Source {
+ public:
+  explicit FileMp4Source(base::File& file) : file_(file) {}
+  uint64_t Size() override { const auto length = file_->GetLength(); return length > 0 ? static_cast<uint64_t>(length) : 0; }
+  bool Read(uint64_t offset, size_t size, std::vector<uint8_t>& out) override {
+    out.resize(size);
+    return offset <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
+        file_->ReadAndCheck(static_cast<int64_t>(offset), base::span(out));
+  }
+ private:
+  raw_ref<base::File> file_;
+};
+class FileMp4Sink : public Mp4Sink {
+ public:
+  explicit FileMp4Sink(base::File& file) : file_(file) {}
+  bool Write(const std::vector<uint8_t>& data, size_t size) override {
+    return size <= data.size() && file_->WriteAtCurrentPosAndCheck(base::span(data).first(size));
+  }
+ private:
+  raw_ref<base::File> file_;
+};
+// Combines separately saved video/audio fragmented MP4 into video.part so the
+// library holds one ordinary MP4 (plays in other apps, no A/V drift). Leaves
+// both inputs untouched and returns false for layouts it cannot rewrite.
+bool MuxSeparateAudio(const base::FilePath& directory) {
+  const auto video_path = directory.AppendASCII("video.part");
+  const auto audio_path = directory.AppendASCII("audio.part");
+  const auto muxed_path = directory.AppendASCII("muxed.part");
+  if (base::IsLink(video_path) || base::IsLink(audio_path)) return false;
+  bool muxed = false;
+  {
+    base::File video(video_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
+    base::File audio(audio_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
+    base::File output(muxed_path, base::File::FLAG_CREATE | base::File::FLAG_WRITE);
+    if (video.IsValid() && audio.IsValid() && output.IsValid()) {
+      FileMp4Source video_source(video), audio_source(audio);
+      FileMp4Sink sink(output);
+      std::string error;
+      muxed = MuxFragmentedMp4(video_source, audio_source, sink, &error) && output.Flush();
+    }
+  }
+  if (!muxed || !base::ReplaceFile(muxed_path, video_path, nullptr)) {
+    base::DeleteFile(muxed_path);
+    return false;
+  }
+  base::DeleteFile(audio_path);
+  return true;
+}
 bool Finalize(base::FilePath directory, std::string title, std::string page, bool audio, bool direct_file) {
   const auto partial = directory.AppendASCII("video.part");
+  // Separate tracks remain a fallback for inputs the muxer rejects.
+  if (audio && MuxSeparateAudio(directory)) audio = false;
   std::string filename = "video.mp4";
   if (direct_file) {
     base::File input(partial, base::File::FLAG_OPEN | base::File::FLAG_READ);
@@ -180,7 +237,13 @@ VideoStream::VideoStream(Profile* profile, content::WeakDocumentPtr document, st
       referrer_policy_(std::move(referrer_policy)),
       worker_(base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN})) {
   directory_ = profile->GetPath().AppendASCII("InternetBrowserVideos").AppendASCII("stream-" + id_.substr(7));
-  if (auto* frame = document_.AsRenderFrameHostIfValid()) source_url_ = frame->GetLastCommittedURL().GetWithoutRef();
+  if (auto* frame = document_.AsRenderFrameHostIfValid()) {
+    source_url_ = frame->GetLastCommittedURL().GetWithoutRef();
+    source_page_url_ = frame->GetLastCommittedURL();
+    initiator_ = frame->GetLastCommittedOrigin();
+    isolation_info_ = frame->GetIsolationInfoForSubresources();
+    header_referrer_policy_ = VideoHeaderReferrerPolicy(frame);
+  }
 }
 VideoStream::~VideoStream() {
   weak_factory_.InvalidateWeakPtrs();
@@ -232,15 +295,26 @@ void VideoStream::DirectoryReady(bool inspect, GURL manifest, Reply reply, bool 
 }
 void VideoStream::Fetch(const GURL& url, const base::FilePath& target) {
   auto* frame = document_.AsRenderFrameHostIfValid();
-  if (!frame || !frame->IsActive() || frame->GetLastCommittedURL().GetWithoutRef() != source_url_ ||
-      content::WebContents::FromRenderFrameHost(frame)->GetBrowserContext() != profile_) {
+  const bool live = frame && frame->IsActive() && frame->GetLastCommittedURL().GetWithoutRef() == source_url_ &&
+      content::WebContents::FromRenderFrameHost(frame)->GetBrowserContext() == profile_;
+  // Inspection reads the page's current playlist; a started save may continue
+  // after the user scrolls to the next video or closes the tab.
+  if (!live && (inspect_ || !initiator_ || source_page_url_.is_empty())) {
     Fail("원본 페이지가 닫히거나 바뀌어 스트림 저장을 중단했습니다."); return;
   }
   if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() || url.has_username() || url.has_password()) {
     Fail("지원하지 않는 영상 구간 주소입니다."); return;
   }
-  auto parameters = frame->CreateDownloadUrlParameters(url, kTraffic);
-  SetVideoReferrer(frame, url, referrer_policy_, parameters.get());
+  std::unique_ptr<download::DownloadUrlParameters> parameters;
+  if (live) {
+    parameters = frame->CreateDownloadUrlParameters(url, kTraffic);
+    SetVideoReferrer(frame, url, referrer_policy_, parameters.get());
+  } else {
+    parameters = std::make_unique<download::DownloadUrlParameters>(url, kTraffic);
+    parameters->set_initiator(initiator_);
+    if (!isolation_info_.IsEmpty()) parameters->set_isolation_info(isolation_info_);
+    SetVideoReferrer(source_page_url_, header_referrer_policy_, url, referrer_policy_, parameters.get());
+  }
   parameters->set_file_path(target);
   parameters->set_transient(true);
   parameters->set_require_safety_checks(true);
@@ -265,9 +339,12 @@ void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
       received_ + item->GetReceivedBytes() > 8.0 * 1024 * 1024 * 1024)) {
     Fail(inspect_ ? "재생 목록이 2 MB 제한을 초과했습니다." : TransportPart() ? "MPEG-TS 구간이 현재 변환 제한인 8 MB를 초과했습니다." : "영상·음성의 합계가 현재 저장 제한인 8 GB를 초과했습니다."); return;
   }
+  // A retried download is flowing again: drop the retry notice.
+  if (item->GetState() == download::DownloadItem::IN_PROGRESS && !paused_ && retries_) error_.clear();
   if (item->GetState() == download::DownloadItem::COMPLETE) {
     const auto path = item->GetTargetFilePath(); const auto url = item->GetURL();
     received_ += item->GetReceivedBytes();
+    retries_ = 0;
     observation_.Reset(); ForgetDownload(profile_, item, false);
     waiting_ = true;
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
@@ -275,6 +352,7 @@ void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
   } else if (item->GetState() == download::DownloadItem::CANCELLED) Fail("영상 저장이 취소되었습니다.");
   else if (item->GetState() == download::DownloadItem::INTERRUPTED) {
     if (inspect_) { Fail("스트림 정보를 내려받지 못했습니다. 원본 페이지에서 영상을 재생한 뒤 다시 시도해 주세요."); return; }
+    if (RetryInterrupted(item)) return;
     switch (item->GetLastReason()) {
       case download::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
         Fail("영상 저장 경로가 너무 깁니다. 더 짧은 경로의 브라우저 프로필에서 다시 시도해 주세요."); return;
@@ -287,6 +365,40 @@ void VideoStream::OnDownloadUpdated(download::DownloadItem* item) {
     }
     paused_ = true;
   }
+}
+// Temporary network/server failures are retried automatically (2 s, 5 s,
+// 10 s) before the job pauses for the user. A direct file resumes in place;
+// a stream part is fetched again under a new attempt name.
+bool VideoStream::RetryInterrupted(download::DownloadItem* item) {
+  using Reason = download::DownloadInterruptReason;
+  const Reason reason = item->GetLastReason();
+  const bool transient = reason == download::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED ||
+      reason == download::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT ||
+      reason == download::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED ||
+      reason == download::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN ||
+      reason == download::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED ||
+      reason == download::DOWNLOAD_INTERRUPT_REASON_SERVER_UNREACHABLE ||
+      reason == download::DOWNLOAD_INTERRUPT_REASON_SERVER_CONTENT_LENGTH_MISMATCH ||
+      reason == download::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR;
+  if (!transient || retries_ >= 3 || paused_) return false;
+  static constexpr std::array<int, 3> kDelaySeconds = {2, 5, 10};
+  const auto delay = base::Seconds(kDelaySeconds[retries_++]);
+  error_ = "연결이 끊겨 다시 시도하는 중입니다 (" + std::to_string(retries_) + "/3).";
+  if (direct_file_ && item->CanResume()) {
+    // Keep the observation and bytes already written; resume outside this
+    // notification (DownloadItem forbids reentry).
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+        base::BindOnce([](base::WeakPtr<VideoStream> job) {
+          if (!job || job->state_ != 0 || job->paused_ || !job->observation_.IsObserving()) return;
+          auto* current = job->observation_.GetSource();
+          if (current->GetState() == download::DownloadItem::INTERRUPTED && current->CanResume()) current->Resume(true);
+        }, weak_factory_.GetWeakPtr()), delay);
+    return true;
+  }
+  observation_.Reset(); ForgetDownload(profile_, item, true);
+  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+      base::BindOnce([](base::WeakPtr<VideoStream> job) { if (job) job->NextPart(); }, weak_factory_.GetWeakPtr()), delay);
+  return true;
 }
 void VideoStream::OnDownloadDestroyed(download::DownloadItem* item) {
   observation_.Reset(); Fail("영상 다운로드가 종료되었습니다.");
@@ -316,10 +428,10 @@ void VideoStream::PartReady(base::FilePath path, GURL final_url) {
 }
 void VideoStream::TransmuxInput(base::FilePath path, std::string encoded) {
   if (state_ != 0) { waiting_ = false; if (state_ != 1) Cleanup(); return; }
+  // The source page may already be gone: a started save continues without it.
   auto* source = document_.AsRenderFrameHostIfValid();
-  if (encoded.empty() || !source || !source->IsActive() || !source->IsRenderFrameLive() ||
-      source->GetLastCommittedURL().GetWithoutRef() != source_url_) {
-    waiting_ = false; Fail("영상 구간을 변환하지 못했습니다. 원본 탭과 구간 크기(8 MB 이하)를 확인해 주세요."); return;
+  if (encoded.empty()) {
+    waiting_ = false; Fail("영상 구간을 변환하지 못했습니다. 구간 크기(8 MB 이하)와 형식을 확인해 주세요."); return;
   }
   const auto generation = ++transmux_generation_;
   base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
@@ -339,7 +451,7 @@ void VideoStream::TransmuxInput(base::FilePath path, std::string encoded) {
   }
   auto* frame = processor_->GetPrimaryMainFrame();
   if (!frame || !frame->IsActive() || !frame->IsRenderFrameLive() || frame->GetLastCommittedURL() != GURL(kProcessorUrl) ||
-      frame->GetProcess() == source->GetProcess()) {
+      (source && frame->GetProcess() == source->GetProcess())) {
     waiting_ = false; Fail("영상 변환 작업 공간을 준비하지 못했습니다."); return;
   }
   processor_isolated_ = true;

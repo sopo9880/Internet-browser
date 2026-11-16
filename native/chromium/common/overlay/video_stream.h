@@ -1,6 +1,7 @@
 #ifndef CHROME_BROWSER_INTERNET_BROWSER_VIDEO_STREAM_H_
 #define CHROME_BROWSER_INTERNET_BROWSER_VIDEO_STREAM_H_
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include "base/files/file_path.h"
@@ -13,11 +14,17 @@
 #include "components/download/public/common/download_item.h"
 #include "content/public/browser/weak_document_ptr.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "net/base/isolation_info.h"
+#include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 class Profile;
 namespace internet_browser {
 // Each manifest/part uses the ordinary frame-bound download path with safety
 // checks required. A partial output is never exposed in the offline library.
+// Once a save has started, leaving or closing the source page no longer stops
+// it: later parts reuse the origin, cookie partition and referrer captured from
+// that page. Inspection still requires the live page.
 class VideoStream : public download::DownloadItem::Observer, public content::WebContentsObserver {
  public:
   using Reply = base::OnceCallback<void(base::DictValue)>;
@@ -44,12 +51,19 @@ class VideoStream : public download::DownloadItem::Observer, public content::Web
   void FinishInspection(base::DictValue result);
   void Finalized(bool success);
   void Fail(const char* error);
+  bool RetryInterrupted(download::DownloadItem* item);
   void Cleanup();
   void ReleaseProcessor();
   bool TransportPart() const;
   raw_ptr<Profile> profile_;
   content::WeakDocumentPtr document_;
   GURL source_url_;
+  // Captured from the source document at construction.
+  GURL source_page_url_;
+  std::optional<url::Origin> initiator_;
+  net::IsolationInfo isolation_info_;
+  std::optional<network::mojom::ReferrerPolicy> header_referrer_policy_;
+  size_t retries_ = 0;
   std::string title_, page_, id_, error_, referrer_policy_;
   base::FilePath directory_;
   std::vector<GURL> parts_;

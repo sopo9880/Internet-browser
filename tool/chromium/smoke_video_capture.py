@@ -21,6 +21,50 @@ except ImportError:
     from smoke_windows import Cdp, eventually
 
 
+def mp4_boxes(data: bytes, start: int = 0, end: int | None = None):
+    """(type, payload) of each ISO BMFF box in data[start:end]."""
+    end = len(data) if end is None else end
+    while start + 8 <= end:
+        size, kind = struct.unpack_from('>I4s', data, start)
+        header = 8
+        if size == 1:
+            size = struct.unpack_from('>Q', data, start + 8)[0]; header = 16
+        elif size == 0:
+            size = end - start
+        if size < header or start + size > end:
+            raise ValueError('Invalid MP4 box')
+        yield kind.decode('latin-1'), data[start + header:start + size]
+        start += size
+
+
+def mp4_handlers(data: bytes) -> list[str]:
+    """Track handler types (vide/soun) of the file's single moov."""
+    handlers = []
+    for kind, moov in mp4_boxes(data):
+        if kind != 'moov': continue
+        for kind, trak in mp4_boxes(moov):
+            if kind != 'trak': continue
+            for kind, mdia in mp4_boxes(trak):
+                if kind != 'mdia': continue
+                for kind, hdlr in mp4_boxes(mdia):
+                    if kind == 'hdlr': handlers.append(hdlr[8:12].decode('latin-1'))
+    return sorted(handlers)
+
+
+def mp4_samples(data: bytes) -> list[bytes]:
+    """Every mdat payload: the compressed samples, independent of box layout."""
+    return sorted(payload for kind, payload in mp4_boxes(data) if kind == 'mdat')
+
+
+def muxed_from(marker: Path, video: bytes, audio: bytes) -> bool:
+    """The saved pair is one two-track MP4 whose samples are exactly the
+    original video and audio samples, with no separate audio file left."""
+    saved = marker.with_name('video.mp4').read_bytes()
+    metadata = json.loads(marker.read_text(encoding='utf-8'))
+    return (not marker.with_name('audio.mp4').exists() and metadata.get('separateAudio') is False and
+            mp4_handlers(saved) == ['soun', 'vide'] and mp4_samples(saved) == sorted(mp4_samples(video) + mp4_samples(audio)))
+
+
 @contextmanager
 def server(media: Path):
     video = (media/'bear-1280x720-av_frag.mp4').read_bytes()
@@ -313,7 +357,8 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 yt_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==yt_saved['guid'] and row['state'] in (1,3)),None))
                 if yt_status['state']!=1: raise RuntimeError(str(yt_status))
                 yt_marker = next(path for path in profile.glob('*/InternetBrowserVideos/*/complete.json') if json.loads(path.read_text(encoding='utf-8')).get('title')=='YouTube 형식 테스트')
-                checks['youtube_adaptive_pair_exact_bytes'] = yt_marker.with_name('video.mp4').read_bytes()==dash_video and yt_marker.with_name('audio.mp4').read_bytes()==dash_audio
+                checks['youtube_adaptive_pair_muxed_exact_samples'] = muxed_from(yt_marker, dash_video, dash_audio)
+                yt_saved_bytes = yt_marker.with_name('video.mp4').read_bytes()
                 def dash_candidate(suffix): return next(row for row in discovered['items'] if row['url'].endswith(suffix))
                 protected = api('inspect', dash_candidate('/dash-protected.mpd')['token'])
                 checks['protected_dash_rejected'] = '보호' in protected.get('error','')
@@ -332,20 +377,21 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 pair_status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==saved_pair['guid'] and row['state'] in (1,3)),None))
                 if pair_status['state']!=1: raise RuntimeError(str(pair_status))
                 pair_marker = next(path for path in profile.glob('*/InternetBrowserVideos/*/complete.json') if json.loads(path.read_text(encoding='utf-8')).get('title')=='DASH fixture')
-                checks['dash_tracks_exact_original_bytes'] = pair_marker.with_name('video.mp4').read_bytes()==dash_video and pair_marker.with_name('audio.mp4').read_bytes()==dash_audio
+                checks['dash_tracks_muxed_exact_samples'] = muxed_from(pair_marker, dash_video, dash_audio)
                 pair_row = next(row for row in library()['videos'] if row['title']=='DASH fixture')
-                checks['dash_library_includes_companion_audio'] = pair_row.get('audioUrl','').endswith('/audio.mp4')
+                checks['dash_library_single_file_without_companion'] = not pair_row.get('audioUrl') and pair_row['url'].endswith('/video.mp4')
                 report['stage'] = 'open_dash_offline_pair'
                 cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserOpenVideo",'+json.dumps(pair_row['url'])+');})()')
                 cdp.call('Page.bringToFront', session=hub)
-                eventually(lambda: cdp.evaluate(hub, 'document.querySelector("#internet-browser-companion-audio")?.readyState>=1 && document.querySelector("video")?.readyState>=1'))
+                eventually(lambda: cdp.evaluate(hub, '!document.querySelector("#internet-browser-companion-audio") && document.querySelector("video")?.readyState>=1'))
                 report['stage'] = 'play_dash_offline_pair'
                 cdp.evaluate(hub, '[...document.querySelectorAll(".ib-controls button")].find(button=>button.textContent==="재생").click()', user_gesture=True)
-                checks['dash_video_and_audio_play_together'] = eventually(lambda: cdp.evaluate(hub, '(()=>{const v=document.querySelector("video"),a=document.querySelector("audio");return !v.paused&&!a.paused&&v.currentTime>0.1&&a.currentTime>0.1&&Math.abs(v.currentTime-a.currentTime)<0.25;})()'))
+                # One element plays both tracks: its own decoder reports audio bytes.
+                checks['dash_muxed_video_and_audio_play'] = eventually(lambda: cdp.evaluate(hub, '(()=>{const v=document.querySelector("video");return !document.querySelector("audio")&&!v.paused&&v.currentTime>0.1&&v.webkitAudioDecodedByteCount>0&&v.webkitVideoDecodedByteCount>0;})()'))
                 cdp.evaluate(hub, '(()=>{const v=document.querySelector("video");v.currentTime=0.6;v.playbackRate=1.5;v.volume=0.3;})()')
-                checks['dash_seek_rate_and_volume_synchronized'] = eventually(lambda: cdp.evaluate(hub, '(()=>{const v=document.querySelector("video"),a=document.querySelector("audio");return a.playbackRate===1.5&&Math.abs(a.volume-0.3)<0.001&&Math.abs(a.currentTime-v.currentTime)<0.25;})()'))
+                checks['dash_muxed_seek_rate_and_volume'] = eventually(lambda: cdp.evaluate(hub, '(()=>{const v=document.querySelector("video");return v.playbackRate===1.5&&Math.abs(v.volume-0.3)<0.001&&v.currentTime>=0.5;})()'))
                 cdp.evaluate(hub, 'document.querySelector("video").pause()')
-                checks['dash_pause_stops_audio'] = eventually(lambda: cdp.evaluate(hub, 'document.querySelector("video").paused && document.querySelector("audio").paused'))
+                checks['dash_muxed_pause'] = eventually(lambda: cdp.evaluate(hub, 'document.querySelector("video").paused && !document.querySelector("audio")'))
                 # The pair is a durable library entry, not an in-memory job.
                 command = browser.args
                 cdp.call('Browser.close'); cdp.close(); cdp = None; browser.wait(timeout=20)
@@ -355,8 +401,8 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 cdp = Cdp(json.load(urlopen(f'http://127.0.0.1:{port}/json/version'))['webSocketDebuggerUrl'])
                 _, hub = open_page('chrome://internet-browser/')
                 durable = next(row for row in library()['videos'] if row['title']=='DASH fixture')
-                checks['dash_pair_survives_browser_restart'] = durable.get('audioUrl')==pair_row['audioUrl'] and durable['url']==pair_row['url']
-                checks['saved_pair_reports_combined_size'] = durable.get('sizeBytes') == pair_marker.with_name('video.mp4').stat().st_size + pair_marker.with_name('audio.mp4').stat().st_size
+                checks['dash_pair_survives_browser_restart'] = not durable.get('audioUrl') and durable['url']==pair_row['url']
+                checks['saved_pair_reports_combined_size'] = durable.get('sizeBytes') == pair_marker.with_name('video.mp4').stat().st_size
                 def delete_video(url, files):
                     return cdp.evaluate(hub, '(async()=>{const {sendWithPromise}=await import("chrome://resources/js/cr.js");return await sendWithPromise("internetBrowserDeleteVideo",'+json.dumps(url)+','+json.dumps(files)+');})()')
                 sentinel = profile/'Default'/'v024-delete-sentinel.txt'; sentinel.write_bytes(b'protected non-library fixture')
@@ -373,7 +419,7 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                 checks['direct_webm_delete_removes_file_and_marker'] = direct_deleted.get('deleted') is True and not direct_path.exists() and not direct_path.with_name('complete.json').exists()
                 erased = delete_video(durable['url'], True)
                 checks['pair_delete_removes_video_audio_and_completion_marker'] = erased.get('deleted') is True and all(not pair_marker.with_name(name).exists() for name in ('video.mp4','audio.mp4','complete.json'))
-                checks['pair_delete_preserves_other_saved_video'] = yt_marker.with_name('video.mp4').read_bytes()==dash_video and yt_marker.with_name('audio.mp4').read_bytes()==dash_audio
+                checks['pair_delete_preserves_other_saved_video'] = yt_marker.with_name('video.mp4').read_bytes()==yt_saved_bytes
                 checks['deleted_pair_disappears_from_library'] = not any(row['url']==durable['url'] for row in library()['videos'])
                 open_page(base+'/no-referrer')
                 private_candidate = next(row for row in api('scan')['items'] if row['url'].endswith('/privacy.mp4'))
@@ -398,12 +444,18 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                     status = eventually(lambda: next((row for row in api('transfers')['items'] if row['guid']==saved['guid'] and row['state'] in (1,3)),None))
                     if status['state']!=1: raise RuntimeError(str(status))
                     marker = next(profile.glob('*/InternetBrowserVideos/stream-'+saved['guid'].split(':')[1]+'/complete.json'))
-                    checks[label+'_audio_exact_bytes'] = marker.with_name('audio.mp4').read_bytes()==dash_audio and json.loads(marker.read_text())['separateAudio'] is True
+                    saved_pair = marker.with_name('video.mp4').read_bytes()
                     if label=='generic_hls_pair':
-                        checks['generic_hls_pair_video_exact_bytes'] = marker.with_name('video.mp4').read_bytes()==dash_video
+                        # Video-only + audio-only fragments become one MP4 with the exact samples.
+                        checks['generic_hls_pair_muxed_audio_samples'] = set(mp4_samples(dash_audio)) <= set(mp4_samples(saved_pair))
+                        checks['generic_hls_pair_muxed_video_samples'] = muxed_from(marker, dash_video, dash_audio)
                     else:
-                        converted = marker.with_name('video.mp4').read_bytes()
-                        checks['generic_hls_mixed_pair_video_converted'] = len(converted)>8 and converted[4:8]==b'ftyp'
+                        # The converted TS already carries its own audio track, so the
+                        # muxer must not guess between two audio tracks: the selected
+                        # audio is kept exactly as a separate file (previous behavior).
+                        checks['generic_hls_mixed_pair_separate_audio_fallback'] = (marker.with_name('audio.mp4').read_bytes()==dash_audio and
+                            json.loads(marker.read_text())['separateAudio'] is True and mp4_handlers(saved_pair)==['soun','vide'])
+                        checks['generic_hls_mixed_pair_video_converted'] = len(saved_pair)>8 and saved_pair[4:8]==b'ftyp'
                 open_page(base+'/ts-page')
                 _, hub = open_page('chrome://internet-browser/')
                 transport_candidates = api('scan')['items']
