@@ -154,7 +154,7 @@ class NativeReleaseStageTests(unittest.TestCase):
                 if case == 'failed-hls': report['checks']['hls_exact_assembled_bytes'] = False
                 if case == 'different-dll': report['chrome_dll_sha256'] = 'f' * 64
                 if case == 'reported-error': report['error'] = 'controlled failure'
-                if case == 'missing-dash-audio': del report['checks']['dash_video_and_audio_play_together']
+                if case == 'missing-dash-audio': del report['checks']['dash_muxed_video_and_audio_play']
                 self.write(path, report)
                 with self.assertRaisesRegex(ValueError, 'video capture'):
                     staging.validate_windows(directory, COMMIT, TREE)
