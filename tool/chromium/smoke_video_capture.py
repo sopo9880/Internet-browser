@@ -445,13 +445,16 @@ def run(executable: Path, media: Path, root: Path, report_file: Path | None = No
                     if status['state']!=1: raise RuntimeError(str(status))
                     marker = next(profile.glob('*/InternetBrowserVideos/stream-'+saved['guid'].split(':')[1]+'/complete.json'))
                     saved_pair = marker.with_name('video.mp4').read_bytes()
-                    # Audio samples are kept exactly inside the single merged MP4.
-                    checks[label+'_muxed_audio_samples'] = (not marker.with_name('audio.mp4').exists() and
-                        json.loads(marker.read_text())['separateAudio'] is False and mp4_handlers(saved_pair)==['soun','vide'] and
-                        set(mp4_samples(dash_audio)) <= set(mp4_samples(saved_pair)))
                     if label=='generic_hls_pair':
+                        # Video-only + audio-only fragments become one MP4 with the exact samples.
+                        checks['generic_hls_pair_muxed_audio_samples'] = set(mp4_samples(dash_audio)) <= set(mp4_samples(saved_pair))
                         checks['generic_hls_pair_muxed_video_samples'] = muxed_from(marker, dash_video, dash_audio)
                     else:
+                        # The converted TS already carries its own audio track, so the
+                        # muxer must not guess between two audio tracks: the selected
+                        # audio is kept exactly as a separate file (previous behavior).
+                        checks['generic_hls_mixed_pair_separate_audio_fallback'] = (marker.with_name('audio.mp4').read_bytes()==dash_audio and
+                            json.loads(marker.read_text())['separateAudio'] is True and mp4_handlers(saved_pair)==['soun','vide'])
                         checks['generic_hls_mixed_pair_video_converted'] = len(saved_pair)>8 and saved_pair[4:8]==b'ftyp'
                 open_page(base+'/ts-page')
                 _, hub = open_page('chrome://internet-browser/')

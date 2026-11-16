@@ -63,7 +63,7 @@ VIDEO_CAPTURE_CHECKS |= {
     'source_no_referrer_policy_preserved',
     'progress_history_clear_preserves_saved_media', 'progress_history_dismissal_survives_hub_reload',
     'generic_hls_pair_quality_and_audio', 'generic_hls_pair_muxed_audio_samples', 'generic_hls_pair_muxed_video_samples',
-    'generic_hls_mixed_pair_quality_and_audio', 'generic_hls_mixed_pair_muxed_audio_samples',
+    'generic_hls_mixed_pair_quality_and_audio', 'generic_hls_mixed_pair_separate_audio_fallback',
     'generic_hls_mixed_pair_video_converted'}
 UPDATE_UI_CHECKS = {
     'video_downloadhelper_below_adblock',
